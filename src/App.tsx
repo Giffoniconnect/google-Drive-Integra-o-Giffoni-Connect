@@ -491,12 +491,24 @@ export default function App() {
       return;
     }
 
-    if (!client.nomeFantasia || client.nomeFantasia.trim() === '') {
-      addLog('error', 'Não foi possível importar o nome do cliente.');
+    const resolvedPJFolderName =
+      client.nomeFantasia?.trim()
+      || client.razaoSocial?.trim()
+      || client.documento?.trim()
+      || '';
+
+    if (!resolvedPJFolderName) {
+      addLog('error', 'Não foi possível importar o nome fantasia ou razão social da Pessoa Jurídica.');
       return;
     }
 
-    addLog('success', 'Nome fantasia da Pessoa Jurídica recebido do Portal BOSS com sucesso.');
+    if (client.nomeFantasia?.trim()) {
+      addLog('success', 'Nome fantasia da Pessoa Jurídica recebido com sucesso.');
+    } else if (client.razaoSocial?.trim()) {
+      addLog('success', 'Nome fantasia ausente; usando razão social da Pessoa Jurídica como fallback.');
+    } else {
+      addLog('success', 'Nome fantasia e razão social ausentes; usando o documento da Pessoa Jurídica como fallback.');
+    }
 
     if (!accessToken) {
       addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
@@ -506,7 +518,7 @@ export default function App() {
     setIsCreatingPJ(true);
 
     try {
-      const resolvedFolderName = client.nomeFantasia.trim();
+      const resolvedFolderName = resolvedPJFolderName;
       let destFolderId = settings.googleDriveDestinationFolderId;
 
       // Locate destination folder
@@ -603,6 +615,12 @@ export default function App() {
     const updated = [...clients, newClient];
     saveClients(updated);
     addLog('info', `Novo cadastro importado para o simulador Giffoni: ${newClient.nomeCompleto || newClient.nomeFantasia}`);
+  };
+
+  const handleRestoreMocks = () => {
+    saveClients(INITIAL_CLIENTS);
+    setSelectedClientId('client_1');
+    addLog('success', 'Mocks de teste restaurados com sucesso para os valores padrão (PF / PJ).');
   };
 
   return (
@@ -720,6 +738,7 @@ export default function App() {
                 isAuthenticated={isAuthenticated}
                 onLogin={handleLogin}
                 onAddClient={handleAddClient}
+                onRestoreMocks={handleRestoreMocks}
                 settings={settings}
                 logs={logs}
                 onClearLogs={handleClearLogs}
