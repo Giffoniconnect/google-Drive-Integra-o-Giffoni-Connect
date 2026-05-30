@@ -13,7 +13,10 @@ import {
   Shield,
   Briefcase,
   Mail,
-  ToggleLeft
+  ToggleLeft,
+  Search,
+  ExternalLink,
+  Folder
 } from 'lucide-react';
 import { IntegrationSettings, IntegrationLog } from '../types';
 import { GSIButton } from './GSIButton';
@@ -65,6 +68,42 @@ export function ConfigurationPage({
 
   const [saving, setSaving] = useState(false);
   const [isTestingFolder, setIsTestingFolder] = useState(false);
+
+  // Folder Search States
+  const [folderSearchQuery, setFolderSearchQuery] = useState('');
+  const [searchedFolders, setSearchedFolders] = useState<any[]>([]);
+  const [isSearchingFolders, setIsSearchingFolders] = useState(false);
+
+  const handleSearchFolders = async () => {
+    if (!isAuthenticated || !accessToken) {
+      onAddLog('error', 'Google Drive não está conectado. Conecte ao Google Drive para buscar pastas.');
+      return;
+    }
+
+    onAddLog('info', 'Modo seguro ativo: exclusão de pastas bloqueada.');
+    onAddLog('info', 'Buscando pastas no Google Drive...');
+    setIsSearchingFolders(true);
+    setSearchedFolders([]);
+
+    try {
+      const { searchFolders } = await import('../lib/drive');
+      const folders = await searchFolders(accessToken, folderSearchQuery);
+      setSearchedFolders(folders);
+      onAddLog('success', `Pastas localizadas com sucesso. (${folders.length} encontradas)`);
+    } catch (e: any) {
+      onAddLog('error', `Falha ao buscar pastas: ${e.message || e}`);
+    } finally {
+      setIsSearchingFolders(false);
+    }
+  };
+
+  const handleSelectFolder = (folder: { id: string; name: string; webViewLink: string }) => {
+    setDestName(folder.name);
+    setDestId(folder.id);
+    setDestUrl(folder.webViewLink);
+    onAddLog('success', `Pasta destino selecionada com sucesso: "${folder.name}"`);
+    onAddLog('info', 'UID e link da pasta destino preenchidos automaticamente.');
+  };
 
   const handleSaveConfigs = () => {
     setSaving(true);
@@ -283,7 +322,7 @@ export function ConfigurationPage({
         </div>
 
         {/* Right side block is Destination Folder Configuration and Logs */}
-        <div className="col-span-1 lg:col-span-5 space-y-6">
+        <div className="col-span-1 lg:col-span-12 xl:col-span-5 space-y-6">
 
           {/* Card: Configuração da pasta destino */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
@@ -330,17 +369,110 @@ export function ConfigurationPage({
                 />
               </div>
 
+              {/* Abrir pasta destino em nova aba */}
+              {destUrl && (
+                <div className="pt-1">
+                  <a
+                    href={destUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-center gap-1.5 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs py-2 rounded-lg transition-all"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Abrir pasta destino no Google Drive</span>
+                  </a>
+                </div>
+              )}
+
               {/* Testar pasta destino button */}
-              <div className="pt-2">
+              <div className="pt-1">
                 <button
                   type="button"
                   onClick={handleTestFolderClick}
                   disabled={isTestingFolder}
                   className="w-full flex items-center justify-center gap-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs py-2 rounded-lg transition-all cursor-pointer disabled:opacity-50 shadow-xs"
                 >
-                  <FolderOpen className={`w-3.5 h-3.5 ${isTestingFolder ? 'animate-pulse text-blue-500' : 'text-slate-500'}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingFolder ? 'animate-spin text-blue-500' : 'text-slate-500'}`} />
                   <span>{isTestingFolder ? 'Verificando pasta...' : 'Testar pasta destino'}</span>
                 </button>
+              </div>
+
+              {/* Real Google Drive folder lookup */}
+              <div className="border-t border-slate-100 pt-3.5 space-y-3">
+                <div>
+                  <h3 className="text-[10px] font-bold text-slate-700 uppercase tracking-widest flex items-center gap-1.5 mb-1 bg-slate-50 py-1 px-1.5 rounded border border-slate-100">
+                    <Search className="w-3.5 h-3.5 text-blue-600" />
+                    Localizar Pasta no Google Drive
+                  </h3>
+                  <p className="text-[10px] text-slate-450 leading-relaxed mb-2">
+                    Digite uma palavra-chave para buscar e selecionar pastas reais em sua conta.
+                  </p>
+
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar pasta no Google Drive..."
+                        value={folderSearchQuery}
+                        onChange={(e) => setFolderSearchQuery(e.target.value)}
+                        className="w-full text-xs pl-8 pr-2 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearchFolders()}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSearchFolders}
+                      disabled={isSearchingFolders || !isAuthenticated}
+                      className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-350 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isSearchingFolders ? 'Buscando...' : 'Buscar pastas'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Searched Results List */}
+                {searchedFolders && searchedFolders.length > 0 && (
+                  <div className="border border-slate-150 rounded-lg max-h-48 overflow-y-auto divide-y divide-slate-100 bg-slate-50">
+                    {searchedFolders.map((folder) => (
+                      <div key={folder.id} className="p-2 sm:p-2.5 flex items-center justify-between text-xs hover:bg-slate-100 transition-all gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-slate-700 truncate flex items-center gap-1">
+                            <Folder className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                            <span className="truncate">{folder.name}</span>
+                          </div>
+                          <div className="text-[9px] font-mono text-slate-400 truncate mt-0.5" title={folder.id}>
+                            UID: {folder.id}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <a
+                            href={folder.webViewLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Visualizar no Google Drive"
+                            className="p-1 border border-slate-200 bg-white hover:bg-slate-50 rounded text-slate-500 hover:text-blue-600 transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectFolder(folder)}
+                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-700 text-blue-700 hover:text-white font-bold text-[10px] rounded transition-all cursor-pointer"
+                          >
+                            Selecionar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {searchedFolders && searchedFolders.length === 0 && folderSearchQuery && !isSearchingFolders && (
+                  <p className="text-[10px] text-slate-400 text-center py-2.5 italic bg-slate-50 rounded-lg border border-dashed border-slate-200 select-none">
+                    Nenhuma pasta encontrada para a busca "{folderSearchQuery}".
+                  </p>
+                )}
               </div>
             </div>
           </div>

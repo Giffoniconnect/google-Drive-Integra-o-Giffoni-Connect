@@ -4,6 +4,46 @@ export interface DriveFolderResult {
   webViewLink?: string;
 }
 
+export interface SearchFolderItem {
+  id: string;
+  name: string;
+  webViewLink: string;
+}
+
+export async function searchFolders(
+  accessToken: string,
+  searchQuery?: string
+): Promise<SearchFolderItem[]> {
+  // Security Log
+  console.log("Modo seguro ativo: exclusão de pastas bloqueada.");
+
+  let query = "mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+  if (searchQuery && searchQuery.trim() !== '') {
+    const safeSearch = searchQuery.replace(/'/g, "\\'");
+    query += ` and name contains '${safeSearch}'`;
+  }
+
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,webViewLink)&pageSize=50`;
+  
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: { message: 'Erro ao buscar pastas.' } }));
+    throw new Error(err.error?.message || `Erro do Google Drive (${response.status})`);
+  }
+
+  const data = await response.json();
+  return (data.files || []).map((file: any) => ({
+    id: file.id,
+    name: file.name,
+    webViewLink: file.webViewLink || `https://drive.google.com/drive/folders/${file.id}`,
+  }));
+}
+
 export async function checkFolderExists(
   accessToken: string,
   folderName: string,
