@@ -89,7 +89,7 @@ export function StructuredStep({
             Painel Operacional — BOSS Clientes
           </h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Fluxo de Produção • <strong className="text-slate-700">Etapa 1.6 — Estruturação do Cadastro Giffoni Connect</strong>
+            Fluxo de Produção • <strong className="text-slate-700">Automação de Criar Pasta a partir do nome do cliente no cadastro</strong>
           </p>
         </div>
 

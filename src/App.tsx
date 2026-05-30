@@ -376,7 +376,7 @@ export default function App() {
                 <span>Fluxo de Produção</span>
                 <span className="text-slate-300">/</span>
                 <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
-                  1.6 Estruturação do Drive
+                  Automação de Criar Pasta a partir do nome do cliente no cadastro
                 </span>
               </>
             ) : (
