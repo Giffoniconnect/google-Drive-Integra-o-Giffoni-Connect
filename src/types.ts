@@ -14,6 +14,33 @@ export interface Client {
   googleDriveStatus?: 'created' | 'linked' | 'pending' | 'error';
 }
 
+export interface BossPayload {
+  sourceBuild: string; // "Portal BOSS Clientes"
+  clientType: 'PF' | 'PJ';
+  portalClientId: string;
+  caseId?: string;
+  clientFolderName: string;
+  originBlock: string; // "pfDadosPessoais" | "pjDadosEmpresa"
+  originField: string; // "nomeCompleto" | "nomeFantasia"
+  razaoSocial?: string; // fallback
+  documento?: string; // fallback
+}
+
+export interface BossResponse {
+  portalClientId: string;
+  caseId?: string;
+  clientType: 'PF' | 'PJ';
+  googleDriveClientFolderName: string;
+  googleDriveClientFolderId: string;
+  googleDriveClientFolderUrl: string;
+  googleDriveCreatedAt: string;
+  googleDriveStatus: 'success' | 'failed';
+  googleDriveClientFolderStatus: 'criada' | 'falha';
+  googleDriveOperation?: 'created' | 'linked';
+  googleDriveClientFolderLogFalha?: string;
+}
+
+
 export interface IntegrationSettings {
   // Authentication states
   googleDriveConnectedEmail: string;

@@ -4,42 +4,12 @@ import {
   FileText, 
   FolderLock
 } from 'lucide-react';
-import { Client, IntegrationSettings, IntegrationLog } from './types';
+import { IntegrationSettings, IntegrationLog } from './types';
 import { initAuth, googleSignIn, logout, setAccessToken } from './lib/firebase';
 import { checkFolderExists, createFolder, testConnection } from './lib/drive';
 import { ConfigurationPage } from './components/ConfigurationPage';
 import { StructuredStep } from './components/StructuredStep';
-
-const INITIAL_CLIENTS: Client[] = [
-  {
-    id: 'client_1',
-    type: 'PF',
-    nomeCompleto: 'Roberto Giffoni',
-    documento: '123.456.789-00',
-  },
-  {
-    id: 'client_2',
-    type: 'PJ',
-    nomeCompleto: '',
-    razaoSocial: 'Giffoni Connect Empreendimentos LTDA',
-    nomeFantasia: 'Giffoni Connect',
-    documento: '12.345.678/0001-99',
-  },
-  {
-    id: 'client_3',
-    type: 'PF',
-    nomeCompleto: 'Ana Souza',
-    documento: '987.654.321-11',
-  },
-  {
-    id: 'client_4',
-    type: 'PJ',
-    nomeCompleto: '',
-    razaoSocial: 'Boss Hub Consultoria LTDA',
-    nomeFantasia: 'Boss Hub',
-    documento: '88.888.888/0001-88',
-  }
-];
+import { BossPayload, BossResponse } from './types';
 
 const INITIAL_SETTINGS: IntegrationSettings = {
   googleDriveConnectedEmail: 'direito.rgr@gmail.com',
@@ -56,8 +26,8 @@ const INITIAL_SETTINGS: IntegrationSettings = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'flow' | 'settings'>('flow');
-  const [clients, setClients] = useState<Client[]>(INITIAL_CLIENTS);
-  const [selectedClientId, setSelectedClientId] = useState<string>('client_1');
+  const [activePayload, setActivePayload] = useState<BossPayload | null>(null);
+  const [activeResponse, setActiveResponse] = useState<BossResponse | null>(null);
   const [settings, setSettings] = useState<IntegrationSettings>(INITIAL_SETTINGS);
   const [logs, setLogs] = useState<IntegrationLog[]>([]);
   
@@ -71,7 +41,7 @@ export default function App() {
   const [isCreatingPF, setIsCreatingPF] = useState(false);
   const [isCreatingPJ, setIsCreatingPJ] = useState(false);
   const [isTestLoading, setIsTestLoading] = useState(false);
- 
+  
   // Helper to push systemic logs
   const addLog = (type: 'info' | 'success' | 'error', message: string, category?: 'connection' | 'localizer') => {
     const newLog: IntegrationLog = {
@@ -84,25 +54,135 @@ export default function App() {
     setLogs(prev => [newLog, ...prev]);
   };
 
-  // Load state from localStorage on init
+  // Sincronização de estado bidirecional com o servidor
   useEffect(() => {
-    // 1. Clients
-    const storedClients = localStorage.getItem('boss_drive_clients');
-    if (storedClients) {
+    const syncWithServer = async () => {
       try {
-        const parsed = JSON.parse(storedClients);
-        if (Array.isArray(parsed)) {
-          const filtered = parsed.filter(c => c && typeof c === 'object' && c.id);
-          setClients(filtered.length > 0 ? filtered : INITIAL_CLIENTS);
-        } else {
-          setClients(INITIAL_CLIENTS);
+        await fetch('/api/sync-active-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessToken,
+            userEmail,
+            settings,
+            activePayload,
+            activeResponse
+          })
+        });
+      } catch (err) {
+        // Ignora falhas de rede no boot ou quando o servidor ainda não subiu
+      }
+    };
+    if (accessToken) {
+      syncWithServer();
+    }
+  }, [accessToken, userEmail, settings, activePayload, activeResponse]);
+
+  // Polling para detectar requisições automáticas externas vindas do Portal BOSS ao servidor backend
+  useEffect(() => {
+    const pollServerState = async () => {
+      try {
+        const response = await fetch('/api/get-active-state');
+        if (response.ok) {
+          const data = await response.json();
+          
+          if (data.activePayload && JSON.stringify(data.activePayload) !== localStorage.getItem('boss_active_payload')) {
+            setActivePayload(data.activePayload);
+            localStorage.setItem('boss_active_payload', JSON.stringify(data.activePayload));
+            addLog('success', 'Nova carga útil recebida via webhook do Portal BOSS.');
+          }
+
+          if (data.activeResponse && JSON.stringify(data.activeResponse) !== localStorage.getItem('boss_active_response')) {
+            setActiveResponse(data.activeResponse);
+            localStorage.setItem('boss_active_response', JSON.stringify(data.activeResponse));
+            addLog('success', 'Retorno operacional do webhook gerado com sucesso.');
+          }
+
+          if (data.logs && data.logs.length > 0) {
+            setLogs(prev => {
+              const prevMap = new Map<string, IntegrationLog>(prev.map(l => [l.message + l.timestamp, l]));
+              let hasNew = false;
+              data.logs.forEach((srvLog: any) => {
+                const clientLogFormat: IntegrationLog = {
+                  id: srvLog.id,
+                  timestamp: srvLog.timestamp,
+                  type: srvLog.type,
+                  message: `[Servidor] ${srvLog.message}`
+                };
+                if (!prevMap.has(clientLogFormat.message + clientLogFormat.timestamp)) {
+                  prevMap.set(clientLogFormat.message + clientLogFormat.timestamp, clientLogFormat);
+                  hasNew = true;
+                }
+              });
+              if (!hasNew) return prev;
+              return Array.from(prevMap.values()).sort((a, b) => b.id.localeCompare(a.id));
+            });
+          }
         }
       } catch (e) {
-        setClients(INITIAL_CLIENTS);
+        // Silencioso em caso de inicialização ou rede temporariamente indisponível
       }
+    };
+
+    const interval = setInterval(pollServerState, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Process receiving raw payload from Portal BOSS
+  const receivePayload = (payload: BossPayload) => {
+    if (!payload) {
+      addLog('error', 'Nenhum payload recebido do Portal BOSS.');
+      return;
+    }
+    if (payload.sourceBuild !== 'Portal BOSS Clientes') {
+      addLog('error', 'Nenhum payload recebido do Portal BOSS.');
+      return;
+    }
+    if (!payload.clientType || (payload.clientType !== 'PF' && payload.clientType !== 'PJ')) {
+      addLog('error', 'Tipo de cliente ausente ou inválido.');
+      return;
+    }
+    if (!payload.portalClientId) {
+      addLog('error', 'portalClientId ausente.');
+      return;
+    }
+    const folderName = payload.clientFolderName?.trim() || payload.razaoSocial?.trim() || payload.documento?.trim() || '';
+    if (!folderName) {
+      addLog('error', 'Nome da pasta não recebido.');
+      return;
+    }
+
+    setActivePayload(payload);
+    localStorage.setItem('boss_active_payload', JSON.stringify(payload));
+    // Clear old response on incoming payload
+    setActiveResponse(null);
+    localStorage.removeItem('boss_active_response');
+
+    addLog('success', 'Payload recebido do Portal BOSS com sucesso.');
+    if (payload.clientType === 'PF') {
+      addLog('info', 'Tipo de cliente identificado: PF.');
+      addLog('info', `Nome da pasta recebido: ${folderName}.`);
     } else {
-      setClients(INITIAL_CLIENTS);
-      localStorage.setItem('boss_drive_clients', JSON.stringify(INITIAL_CLIENTS));
+      addLog('info', 'Tipo de cliente identificado: PJ.');
+      addLog('info', `Nome fantasia recebido: ${folderName}.`);
+    }
+  };
+
+  // Load state from localStorage on init
+  useEffect(() => {
+    // 1. Initial State for Payload & Response
+    const storedPayload = localStorage.getItem('boss_active_payload');
+    if (storedPayload) {
+      try {
+        setActivePayload(JSON.parse(storedPayload));
+      } catch (e) {}
+    }
+
+    const storedResponse = localStorage.getItem('boss_active_response');
+    if (storedResponse) {
+      try {
+        setActiveResponse(JSON.parse(storedResponse));
+      } catch (e) {}
     }
 
     // 2. Settings
@@ -130,14 +210,38 @@ export default function App() {
     }
 
     // 3. Welcome log
-    addLog('info', 'Integração Google Drive Giffoni Connect — Console Pronta.');
+    addLog('info', 'Integração Google Drive Giffoni Connect — Ponte Real Ativa.');
   }, []);
 
-  // Sync clients to localStorage when edited
-  const saveClients = (updatedClients: Client[]) => {
-    setClients(updatedClients);
-    localStorage.setItem('boss_drive_clients', JSON.stringify(updatedClients));
-  };
+  // Web postMessage & URL Listener for real Boss Payload
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.sourceBuild === 'Portal BOSS Clientes') {
+        receivePayload(event.data);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Read URL Search params if direct redirect from Portal BOSS
+    const urlParams = new URLSearchParams(window.location.search);
+    const rawPayload = urlParams.get('payload');
+    if (rawPayload) {
+      try {
+        const decoded = decodeURIComponent(rawPayload);
+        const parsed = JSON.parse(decoded);
+        if (parsed && parsed.sourceBuild === 'Portal BOSS Clientes') {
+          receivePayload(parsed);
+        }
+      } catch (e) {
+        console.error('Falha ao decodificar payload da URL:', e);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
 
   // Sync settings to localStorage when edited
   const handleSaveSettings = (newSettingsFields: Partial<IntegrationSettings>) => {
@@ -360,22 +464,28 @@ export default function App() {
   };
 
   /**
-   * SEPARATED FLOW: PESSOA FÍSICA (PF)
-   * Focuses on `nomeCompleto`
+   * SEPARATED OPERATIONAL FLOW: PESSOA FÍSICA (PF)
    */
-  const handleCreateFolderPF = async (clientId: string) => {
-    const client = clients.find(c => c.id === clientId);
-    if (!client) {
-      addLog('error', 'Não foi possível importar o nome do cliente.');
+  const handleCreateFolderPF = async () => {
+    if (!activePayload) {
+      addLog('error', 'Nenhum payload recebido do Portal BOSS.');
+      return;
+    }
+    if (activePayload.clientType !== 'PF') {
+      addLog('error', 'Tipo de cliente ausente ou inválido.');
       return;
     }
 
-    if (!client.nomeCompleto || client.nomeCompleto.trim() === '') {
-      addLog('error', 'Não foi possível importar o nome do cliente.');
+    const folderName = activePayload.clientFolderName?.trim() || '';
+    if (!folderName) {
+      addLog('error', 'Nome da pasta não recebido.');
       return;
     }
 
-    addLog('success', 'Nome completo da Pessoa Física recebido do Portal BOSS com sucesso.');
+    if (!activePayload.portalClientId) {
+      addLog('error', 'portalClientId ausente.');
+      return;
+    }
 
     if (!accessToken) {
       addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
@@ -385,126 +495,91 @@ export default function App() {
     setIsCreatingPF(true);
 
     try {
-      const resolvedFolderName = client.nomeCompleto.trim();
-      let destFolderId = settings.googleDriveDestinationFolderId;
+      addLog('info', 'Processando criação de pasta PF via servidor...');
+      const body = {
+        clientType: 'PF',
+        portalClientId: activePayload.portalClientId,
+        caseId: activePayload.caseId || 'case_default_pf',
+        clientFolderName: folderName,
+        originBlock: activePayload.originBlock || 'pfDadosPessoais',
+        originField: activePayload.originField || 'nomeCompleto'
+      };
 
-      // Locate destination folder
-      addLog('info', `Localizando pasta de destino "${settings.googleDriveDestinationFolderName}"...`);
-      if (!destFolderId) {
-        // search for "clientes office"
-        const foundDest = await checkFolderExists(accessToken, settings.googleDriveDestinationFolderName);
-        if (foundDest.exists && foundDest.id) {
-          destFolderId = foundDest.id;
-          handleSaveSettings({
-            googleDriveDestinationFolderId: foundDest.id,
-            googleDriveDestinationFolderUrl: foundDest.webViewLink || `https://drive.google.com/drive/folders/${foundDest.id}`
-          });
-        } else {
-          // create destination folder if missing altogether
-          addLog('info', `Pasta destino "${settings.googleDriveDestinationFolderName}" não localizada no sandbox. Criando...`);
-          const createdDest = await createFolder(accessToken, settings.googleDriveDestinationFolderName);
-          destFolderId = createdDest.id;
-          handleSaveSettings({
-            googleDriveDestinationFolderId: createdDest.id,
-            googleDriveDestinationFolderUrl: createdDest.webViewLink
-          });
-        }
-      }
-
-      if (!destFolderId) {
-        addLog('error', 'Não foi possível localizar a pasta de destino.');
-        setIsCreatingPF(false);
-        return;
-      }
-
-      addLog('success', 'Pasta de destino localizada com sucesso.');
-
-      // Anti-duplicity check
-      if (client.googleDriveClientFolderId && client.googleDriveStatus === 'linked') {
-        addLog('info', 'Pasta do cliente já criada e vinculada.');
-        setIsCreatingPF(false);
-        return;
-      }
-
-      // Check Google Drive query for existence
-      const checkResult = await checkFolderExists(accessToken, resolvedFolderName, destFolderId);
-      if (checkResult.exists && checkResult.id) {
-        addLog('info', 'Pasta do cliente já criada e vinculada.');
-        
-        const updatedClients = clients.map(c => {
-          if (c.id === clientId) {
-            return {
-              ...c,
-              googleDriveClientFolderName: resolvedFolderName,
-              googleDriveClientFolderId: checkResult.id,
-              googleDriveClientFolderUrl: checkResult.webViewLink,
-              googleDriveCreatedAt: c.googleDriveCreatedAt || new Date().toISOString(),
-              googleDriveStatus: 'linked' as const,
-            };
-          }
-          return c;
-        });
-        saveClients(updatedClients);
-        setIsCreatingPF(false);
-        return;
-      }
-
-      // Execute Folder Creation for PF
-      const createdFolderResult = await createFolder(accessToken, resolvedFolderName, destFolderId);
-
-      const timestamp = new Date().toISOString();
-      const updatedClients = clients.map(c => {
-        if (c.id === clientId) {
-          return {
-            ...c,
-            googleDriveClientFolderName: resolvedFolderName,
-            googleDriveClientFolderId: createdFolderResult.id,
-            googleDriveClientFolderUrl: createdFolderResult.webViewLink,
-            googleDriveCreatedAt: timestamp,
-            googleDriveStatus: 'created' as const,
-          };
-        }
-        return c;
+      const response = await fetch('/api/create-folder', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
       });
 
-      saveClients(updatedClients);
-      addLog('success', 'Pasta da Pessoa Física criada com sucesso.');
+      if (!response.ok) {
+        throw new Error(`Erro do servidor (${response.status})`);
+      }
 
+      const resData = await response.json() as BossResponse;
+      if (resData.googleDriveStatus === 'success') {
+        setActiveResponse(resData);
+        localStorage.setItem('boss_active_response', JSON.stringify(resData));
+        addLog('success', `Retorno para o Portal BOSS gerado com sucesso.`);
+
+        if (resData.googleDriveOperation === 'linked') {
+          addLog('info', 'Regra anti-duplicidade verificada: pasta de cliente já existente vinculada.');
+        } else {
+          addLog('success', 'Nova pasta de Pessoa Física mapeada e criada com sucesso.');
+        }
+
+        // Dispatch to parent in iframe environment if any
+        if (window.parent) {
+          window.parent.postMessage({
+            type: 'PORTAL_BOSS_DRIVE_RESPONSE',
+            payload: resData
+          }, '*');
+        }
+      } else {
+        addLog('error', `Falha ao processar: ${resData.googleDriveClientFolderLogFalha || 'Erro indeterminado'}`);
+      }
     } catch (err: any) {
       console.error(err);
-      addLog('error', 'Não foi possível criar a pasta do cliente.');
-      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
-      addLog('error', 'Verifique se a chave de API/credenciais foram configuradas.');
+      addLog('error', `Não foi possível criar a pasta do cliente: ${err.message || err}`);
     } finally {
       setIsCreatingPF(false);
     }
   };
 
   /**
-   * SEPARATED FLOW: PESSOA JURÍDICA (PJ)
-   * Focuses on `nomeFantasia`
+   * SEPARATED OPERATIONAL FLOW: PESSOA JURÍDICA (PJ)
    */
-  const handleCreateFolderPJ = async (clientId: string) => {
-    const client = clients.find(c => c.id === clientId);
-    if (!client) {
-      addLog('error', 'Não foi possível importar o nome do cliente.');
+  const handleCreateFolderPJ = async () => {
+    if (!activePayload) {
+      addLog('error', 'Nenhum payload recebido do Portal BOSS.');
+      return;
+    }
+    if (activePayload.clientType !== 'PJ') {
+      addLog('error', 'Tipo de cliente ausente ou inválido.');
       return;
     }
 
     const resolvedPJFolderName =
-      client.nomeFantasia?.trim()
-      || client.razaoSocial?.trim()
-      || client.documento?.trim()
+      activePayload.clientFolderName?.trim()
+      || activePayload.razaoSocial?.trim()
+      || activePayload.documento?.trim()
       || '';
 
     if (!resolvedPJFolderName) {
       addLog('error', 'Não foi possível importar o nome fantasia ou razão social da Pessoa Jurídica.');
+      addLog('error', 'Nome da pasta não recebido.');
       return;
     }
 
-    if (client.nomeFantasia?.trim()) {
-      addLog('success', 'Nome fantasia da Pessoa Jurídica recebido com sucesso.');
-    } else if (client.razaoSocial?.trim()) {
+    if (!activePayload.portalClientId) {
+      addLog('error', 'portalClientId ausente.');
+      return;
+    }
+
+    if (activePayload.clientFolderName?.trim()) {
+      addLog('success', `Nome fantasia recebido: ${activePayload.clientFolderName.trim()}.`);
+    } else if (activePayload.razaoSocial?.trim()) {
       addLog('success', 'Nome fantasia ausente; usando razão social da Pessoa Jurídica como fallback.');
     } else {
       addLog('success', 'Nome fantasia e razão social ausentes; usando o documento da Pessoa Jurídica como fallback.');
@@ -518,109 +593,56 @@ export default function App() {
     setIsCreatingPJ(true);
 
     try {
-      const resolvedFolderName = resolvedPJFolderName;
-      let destFolderId = settings.googleDriveDestinationFolderId;
+      addLog('info', 'Processando criação de pasta PJ via servidor...');
+      const body = {
+        clientType: 'PJ',
+        portalClientId: activePayload.portalClientId,
+        caseId: activePayload.caseId || 'case_default_pj',
+        clientFolderName: resolvedPJFolderName,
+        originBlock: activePayload.originBlock || 'pjDadosEmpresa',
+        originField: activePayload.originField || 'nomeFantasia'
+      };
 
-      // Locate destination folder
-      addLog('info', `Localizando pasta de destino "${settings.googleDriveDestinationFolderName}"...`);
-      if (!destFolderId) {
-        const foundDest = await checkFolderExists(accessToken, settings.googleDriveDestinationFolderName);
-        if (foundDest.exists && foundDest.id) {
-          destFolderId = foundDest.id;
-          handleSaveSettings({
-            googleDriveDestinationFolderId: foundDest.id,
-            googleDriveDestinationFolderUrl: foundDest.webViewLink || `https://drive.google.com/drive/folders/${foundDest.id}`
-          });
-        } else {
-          addLog('info', `Pasta destino "${settings.googleDriveDestinationFolderName}" não localizada no sandbox. Criando...`);
-          const createdDest = await createFolder(accessToken, settings.googleDriveDestinationFolderName);
-          destFolderId = createdDest.id;
-          handleSaveSettings({
-            googleDriveDestinationFolderId: createdDest.id,
-            googleDriveDestinationFolderUrl: createdDest.webViewLink
-          });
-        }
-      }
-
-      if (!destFolderId) {
-        addLog('error', 'Não foi possível localizar a pasta de destino.');
-        setIsCreatingPJ(false);
-        return;
-      }
-
-      addLog('success', 'Pasta de destino localizada com sucesso.');
-
-      // Anti-duplicity check
-      if (client.googleDriveClientFolderId && client.googleDriveStatus === 'linked') {
-        addLog('info', 'Pasta do cliente já criada e vinculada.');
-        setIsCreatingPJ(false);
-        return;
-      }
-
-      // Check Google Drive query for existence
-      const checkResult = await checkFolderExists(accessToken, resolvedFolderName, destFolderId);
-      if (checkResult.exists && checkResult.id) {
-        addLog('info', 'Pasta do cliente já criada e vinculada.');
-        
-        const updatedClients = clients.map(c => {
-          if (c.id === clientId) {
-            return {
-              ...c,
-              googleDriveClientFolderName: resolvedFolderName,
-              googleDriveClientFolderId: checkResult.id,
-              googleDriveClientFolderUrl: checkResult.webViewLink,
-              googleDriveCreatedAt: c.googleDriveCreatedAt || new Date().toISOString(),
-              googleDriveStatus: 'linked' as const,
-            };
-          }
-          return c;
-        });
-        saveClients(updatedClients);
-        setIsCreatingPJ(false);
-        return;
-      }
-
-      // Execute Folder Creation for PJ
-      const createdFolderResult = await createFolder(accessToken, resolvedFolderName, destFolderId);
-
-      const timestamp = new Date().toISOString();
-      const updatedClients = clients.map(c => {
-        if (c.id === clientId) {
-          return {
-            ...c,
-            googleDriveClientFolderName: resolvedFolderName,
-            googleDriveClientFolderId: createdFolderResult.id,
-            googleDriveClientFolderUrl: createdFolderResult.webViewLink,
-            googleDriveCreatedAt: timestamp,
-            googleDriveStatus: 'created' as const,
-          };
-        }
-        return c;
+      const response = await fetch('/api/create-folder', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
       });
 
-      saveClients(updatedClients);
-      addLog('success', 'Pasta da Pessoa Jurídica criada com sucesso.');
+      if (!response.ok) {
+        throw new Error(`Erro do servidor (${response.status})`);
+      }
 
+      const resData = await response.json() as BossResponse;
+      if (resData.googleDriveStatus === 'success') {
+        setActiveResponse(resData);
+        localStorage.setItem('boss_active_response', JSON.stringify(resData));
+        addLog('success', `Retorno para o Portal BOSS gerado com sucesso.`);
+
+        if (resData.googleDriveOperation === 'linked') {
+          addLog('info', 'Regra anti-duplicidade verificada: pasta de cliente já existente vinculada.');
+        } else {
+          addLog('success', 'Nova pasta de Pessoa Jurídica criada com sucesso.');
+        }
+
+        // Dispatch to parent in iframe environment if any
+        if (window.parent) {
+          window.parent.postMessage({
+            type: 'PORTAL_BOSS_DRIVE_RESPONSE',
+            payload: resData
+          }, '*');
+        }
+      } else {
+        addLog('error', `Falha ao processar: ${resData.googleDriveClientFolderLogFalha || 'Erro indeterminado'}`);
+      }
     } catch (err: any) {
       console.error(err);
-      addLog('error', 'Não foi possível criar a pasta do cliente.');
-      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
-      addLog('error', 'Verifique se a chave de API/credenciais foram configuradas.');
+      addLog('error', `Não foi possível criar a pasta do cliente: ${err.message || err}`);
     } finally {
       setIsCreatingPJ(false);
     }
-  };
-
-  const handleAddClient = (newClient: Client) => {
-    const updated = [...clients, newClient];
-    saveClients(updated);
-    addLog('info', `Novo cadastro importado para o simulador Giffoni: ${newClient.nomeCompleto || newClient.nomeFantasia}`);
-  };
-
-  const handleRestoreMocks = () => {
-    saveClients(INITIAL_CLIENTS);
-    setSelectedClientId('client_1');
-    addLog('success', 'Mocks de teste restaurados com sucesso para os valores padrão (PF / PJ).');
   };
 
   return (
@@ -728,17 +750,15 @@ export default function App() {
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 sm:p-8">
             {activeTab === 'flow' ? (
               <StructuredStep
-                clients={clients}
-                selectedClientId={selectedClientId}
-                onSelectClient={setSelectedClientId}
+                activePayload={activePayload}
+                activeResponse={activeResponse}
+                onInjectPayload={receivePayload}
                 onCreateFolderPF={handleCreateFolderPF}
                 onCreateFolderPJ={handleCreateFolderPJ}
                 isCreatingPF={isCreatingPF}
                 isCreatingPJ={isCreatingPJ}
                 isAuthenticated={isAuthenticated}
                 onLogin={handleLogin}
-                onAddClient={handleAddClient}
-                onRestoreMocks={handleRestoreMocks}
                 settings={settings}
                 logs={logs}
                 onClearLogs={handleClearLogs}

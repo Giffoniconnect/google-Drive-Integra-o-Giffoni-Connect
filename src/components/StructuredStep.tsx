@@ -12,23 +12,23 @@ import {
   Terminal,
   Trash2,
   Copy,
-  HelpCircle,
-  FolderLock
+  ChevronDown,
+  ChevronUp,
+  FolderLock,
+  ArrowRightLeft
 } from 'lucide-react';
-import { Client, IntegrationSettings, IntegrationLog } from '../types';
+import { BossPayload, BossResponse, IntegrationSettings, IntegrationLog } from '../types';
 
 interface StructuredStepProps {
-  clients: Client[];
-  selectedClientId: string;
-  onSelectClient: (id: string) => void;
-  onCreateFolderPF: (clientId: string) => Promise<void>;
-  onCreateFolderPJ: (clientId: string) => Promise<void>;
+  activePayload: BossPayload | null;
+  activeResponse: BossResponse | null;
+  onInjectPayload: (payload: BossPayload) => void;
+  onCreateFolderPF: () => Promise<void>;
+  onCreateFolderPJ: () => Promise<void>;
   isCreatingPF: boolean;
   isCreatingPJ: boolean;
   isAuthenticated: boolean;
   onLogin: () => void;
-  onAddClient: (client: Client) => void;
-  onRestoreMocks: () => void;
   settings: IntegrationSettings;
   logs: IntegrationLog[];
   onClearLogs: () => void;
@@ -36,77 +36,55 @@ interface StructuredStepProps {
 }
 
 export function StructuredStep({
-  clients,
-  selectedClientId,
-  onSelectClient,
+  activePayload,
+  activeResponse,
+  onInjectPayload,
   onCreateFolderPF,
   onCreateFolderPJ,
   isCreatingPF,
   isCreatingPJ,
   isAuthenticated,
   onLogin,
-  onAddClient,
-  onRestoreMocks,
   settings,
   logs,
   onClearLogs,
   onAddLog
 }: StructuredStepProps) {
-  const [showAddClient, setShowAddClient] = useState(false);
-  const [newType, setNewType] = useState<'PF' | 'PJ'>('PF');
-  const [newNome, setNewNome] = useState('');
-  const [newRazao, setNewRazao] = useState('');
-  const [newFantasia, setNewFantasia] = useState('');
-  const [newDoc, setNewDoc] = useState('');
+  const [showSimulator, setShowSimulator] = useState(false);
+  
+  // Local simulator custom fields
+  const [simType, setSimType] = useState<'PF' | 'PJ'>('PF');
+  const [simName, setSimName] = useState('Roberto Giffoni');
+  const [simDoc, setSimDoc] = useState('123.456.789-00');
+  const [simId, setSimId] = useState('pb_client_pf_9012');
 
-  const handleSelectMockPJ = () => {
-    const pjClients = (clients || []).filter(c => c && c.type === 'PJ');
-    // prefer client PJ that has nomeFantasia prefilled
-    const target = pjClients.find(c => c.nomeFantasia && c.nomeFantasia.trim() !== '') || pjClients[0];
-    if (target) {
-      onSelectClient(target.id);
-      onAddLog('success', 'Mock de Pessoa Jurídica selecionado para teste com sucesso.');
+  const handleSimulateInjection = (typeOverride?: 'PF' | 'PJ') => {
+    const currentType = typeOverride || simType;
+    let payload: BossPayload;
+
+    if (currentType === 'PF') {
+      payload = {
+        sourceBuild: 'Portal BOSS Clientes',
+        clientType: 'PF',
+        portalClientId: simId.trim() || 'pb_client_pf_9012',
+        clientFolderName: simName.trim() || 'Roberto Giffoni',
+        originBlock: 'pfDadosPessoais',
+        originField: 'nomeCompleto'
+      };
     } else {
-      onAddLog('error', 'Nenhum cliente Pessoa Jurídica cadastrado no sistema.');
+      payload = {
+        sourceBuild: 'Portal BOSS Clientes',
+        clientType: 'PJ',
+        portalClientId: simId.trim() === 'pb_client_pf_9012' ? 'pb_client_pj_5678' : (simId.trim() || 'pb_client_pj_5678'),
+        clientFolderName: simName.trim() === 'Roberto Giffoni' ? 'Giffoni Connect' : (simName.trim() || 'Giffoni Connect'),
+        razaoSocial: 'Giffoni Connect Empreendimentos LTDA',
+        documento: simDoc.trim() === '123.456.789-00' ? '12.345.678/0001-99' : (simDoc.trim() || '12.345.678/0001-99'),
+        originBlock: 'pjDadosEmpresa',
+        originField: 'nomeFantasia'
+      };
     }
-  };
 
-  const validClients = (clients || []).filter(c => c && typeof c === 'object' && c.id);
-  const activeClient = validClients.find(c => c.id === selectedClientId) || validClients[0];
-
-  const handleCreateClientSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newType === 'PF' && !newNome.trim()) return;
-    if (newType === 'PJ' && !newFantasia.trim() && !newRazao.trim()) return;
-
-    const newClient: Client = {
-      id: `client_${Date.now()}`,
-      type: newType,
-      nomeCompleto: newType === 'PF' ? newNome.trim() : '',
-      razaoSocial: newType === 'PJ' ? (newRazao.trim() || newFantasia.trim()) : undefined,
-      nomeFantasia: newType === 'PJ' ? newFantasia.trim() : undefined,
-      documento: newDoc.trim() || (newType === 'PF' ? '000.000.000-00' : '00.000.000/0001-00'),
-    };
-
-    onAddClient(newClient);
-    onSelectClient(newClient.id);
-    setShowAddClient(false);
-    
-    // reset form
-    setNewNome('');
-    setNewRazao('');
-    setNewFantasia('');
-    setNewDoc('');
-  };
-
-  // Human-friendly client name Resolver
-  const getClientDisplayName = (client: Client) => {
-    if (!client) return 'Selecione';
-    if (client.type === 'PF') {
-      return client.nomeCompleto || 'Sem Nome PF';
-    } else {
-      return client.nomeFantasia || client.razaoSocial || 'Sem Nome Fantasia PJ';
-    }
+    onInjectPayload(payload);
   };
 
   const handleCopyLogs = () => {
@@ -124,254 +102,205 @@ export function StructuredStep({
       });
   };
 
+  const handleCopyResponse = () => {
+    if (!activeResponse) return;
+    const text = JSON.stringify(activeResponse, null, 2);
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        onAddLog('success', 'Retorno JSON copiado com sucesso.');
+      })
+      .catch(() => {
+        onAddLog('error', 'Falha ao copiar retorno.');
+      });
+  };
+
   return (
     <div id="structured-step-container" className="space-y-6">
       
-      {/* Top Banner & Client Selector */}
-      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between border-b border-slate-200 pb-5 gap-4">
+      {/* Top Banner and Description */}
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between border-b border-slate-250 pb-5 gap-4">
         <div>
           <h1 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <FolderLock className="w-4 h-4 text-blue-600" />
-            Criar Pasta do Cliente no Google Drive
+            Integração Operacional Google Drive — Portal BOSS
           </h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Módulo simulador para dados do Portal BOSS. Crie pastas isoladas para PF e PJ sem conflito de gatilhos.
+            Ponte operacional para criação de pastas e retorno automatizado de contratos para o Portal BOSS.
           </p>
         </div>
-
-        {/* Client Selection tool rail */}
-        <div id="client-selection-bar" className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <div className="flex-1 lg:flex-none">
-            <select
-              value={selectedClientId}
-              onChange={(e) => onSelectClient(e.target.value)}
-              className="w-full lg:w-64 text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-bold text-slate-700 transition-all cursor-pointer"
-            >
-              {validClients.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.type === 'PF' ? `[PF] ${c.nomeCompleto}` : `[PJ] ${c.nomeFantasia || c.razaoSocial}`}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={handleSelectMockPJ}
-            className="p-2 border border-emerald-200 hover:border-emerald-400 text-emerald-800 hover:bg-emerald-50 rounded-lg transition-all flex items-center justify-center cursor-pointer font-bold gap-1 text-xs"
-            title="Selecionar Mock PJ para Teste"
-          >
-            <Building className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Selecionar Mock PJ</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowAddClient(!showAddClient)}
-            className="p-2 border border-slate-200 hover:border-slate-350 text-slate-600 hover:text-blue-600 rounded-lg hover:bg-slate-50 transition-all flex items-center justify-center cursor-pointer font-bold gap-1 text-xs"
-            title="Adicionar Novo Cliente para Teste"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span>Simular Cadastro</span>
-          </button>
-          <button
-            type="button"
-            onClick={onRestoreMocks}
-            className="p-2 border border-amber-200 hover:border-amber-400 text-amber-800 hover:bg-amber-50 rounded-lg transition-all flex items-center justify-center cursor-pointer font-bold gap-1 text-xs"
-            title="Restaurar mocks de teste originais"
-          >
-            <FileCheck className="w-3.5 h-3.5 text-amber-600" />
-            <span>Restaurar Mocks</span>
-          </button>
-        </div>
+        
+        {/* Toggleable Integration Helper for Sandbox tests */}
+        <button
+          onClick={() => setShowSimulator(!showSimulator)}
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 flex items-center gap-1.5 transition-all select-none cursor-pointer"
+        >
+          <ArrowRightLeft className="w-3.5 h-3.5 text-blue-500" />
+          <span>{showSimulator ? 'Ocultar Injetor de Carga' : 'Abrir Injetor de Carga'}</span>
+          {showSimulator ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
       </div>
 
-      {/* Add Client Simulator Modal / Form */}
-      {showAddClient && (
+      {/* Simulator Payload Injector Section */}
+      {showSimulator && (
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4 animate-fade-in">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
-            Simular Novo Cadastro (Do Portal BOSS)
-          </h3>
-          <form onSubmit={handleCreateClientSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+              Injetor do Portal BOSS (Apenas Desenvolvimento e Depuração)
+            </h3>
+            <span className="text-[10px] text-slate-400 font-medium">Insira dados para testar a ponte operacional</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 rounded-lg border border-slate-200">
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Tipo de Cliente</label>
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setNewType('PF')}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${newType === 'PF' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  onClick={() => {
+                    setSimType('PF');
+                    setSimName('Roberto Giffoni');
+                    setSimDoc('123.456.789-00');
+                    setSimId('pb_client_pf_9012');
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${simType === 'PF' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                 >
                   Pessoa Física (PF)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewType('PJ')}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${newType === 'PJ' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                  onClick={() => {
+                    setSimType('PJ');
+                    setSimName('Giffoni Connect');
+                    setSimDoc('12.345.678/0001-99');
+                    setSimId('pb_client_pj_5678');
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${simType === 'PJ' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                 >
                   Pessoa Jurídica (PJ)
                 </button>
               </div>
             </div>
 
-            {newType === 'PF' ? (
-              <div className="col-span-1 md:col-span-2">
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Nome Completo (nomeCompleto)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Roberto Giffoni"
-                  value={newNome}
-                  onChange={(e) => setNewNome(e.target.value)}
-                  className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-semibold text-slate-700"
-                />
-              </div>
-            ) : (
-              <>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Nome Fantasia (nomeFantasia)</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Giffoni Connect"
-                    value={newFantasia}
-                    onChange={(e) => setNewFantasia(e.target.value)}
-                    className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-semibold text-slate-700"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Razão Social (Opcional)</label>
-                  <input
-                    type="text"
-                    placeholder="Giffoni Connect Empreendimentos LTDA"
-                    value={newRazao}
-                    onChange={(e) => setNewRazao(e.target.value)}
-                    className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-semibold text-slate-700"
-                  />
-                </div>
-              </>
-            )}
-
             <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Doc CPF / CNPJ</label>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">ID do Cliente BOSS</label>
               <input
                 type="text"
-                placeholder="Ex: 123.456.789-00"
-                value={newDoc}
-                onChange={(e) => setNewDoc(e.target.value)}
-                className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-semibold text-slate-700"
+                value={simId}
+                onChange={(e) => setSimId(e.target.value)}
+                className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white font-mono text-slate-700 focus:outline-none"
               />
             </div>
 
-            <div className="col-span-1 md:col-span-4 flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
-              <button
-                type="button"
-                onClick={() => setShowAddClient(false)}
-                className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors"
-              >
-                Incluir Cadastro na Fila do BOSS
-              </button>
+            <div className="col-span-1 md:col-span-2">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                {simType === 'PF' ? 'Nome Completo (nomeCompleto)' : 'Nome Fantasia (nomeFantasia)'}
+              </label>
+              <input
+                type="text"
+                value={simName}
+                onChange={(e) => setSimName(e.target.value)}
+                className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg bg-white font-semibold text-slate-700 focus:outline-none"
+              />
             </div>
-          </form>
+          </div>
+
+          <div className="flex flex-wrap gap-2 justify-end">
+            <button
+              onClick={() => {
+                setSimType('PF');
+                setSimName('Roberto Giffoni');
+                setSimDoc('123.456.789-00');
+                setSimId('pb_client_pf_9012');
+                handleSimulateInjection('PF');
+              }}
+              className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              Injetar Carga Útil PF (Pessoa Física)
+            </button>
+            <button
+              onClick={() => {
+                setSimType('PJ');
+                setSimName('Giffoni Connect');
+                setSimDoc('12.345.678/0001-99');
+                setSimId('pb_client_pj_5678');
+                handleSimulateInjection('PJ');
+              }}
+              className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-850 text-white font-bold rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            >
+              Injetar Carga Útil PJ (Pessoa Jurídica)
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Core Fields Grid: Imported and Created targets */}
+      {/* Section 3: Dados recebidos do Portal BOSS */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
         <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-2">
-          <span>Informações do Mapeamento de Pastas (Google Drive Connect)</span>
+          <CheckCircle className="w-4 h-4 text-slate-500" />
+          <span>Dados recebidos do Portal BOSS</span>
         </h3>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          
-          {/* Imported Client Frame */}
-          <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs">
-            <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Nome de Cadastro do Portal BOSS</div>
-            <div className="text-xs font-bold text-slate-800 truncate" title={getClientDisplayName(activeClient)}>
-              {getClientDisplayName(activeClient)}
+        {activePayload ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs">
+              <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Nome Recebido para Pasta</div>
+              <div className="text-xs font-bold text-slate-900 truncate" title={activePayload.clientFolderName}>
+                {activePayload.clientFolderName}
+              </div>
+              <span className="text-[9px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-sm block w-fit">
+                Tipo: {activePayload.clientType}
+              </span>
             </div>
-            <span className="text-[9px] font-semibold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-sm block w-fit">
-              Tipo: {activeClient?.type || 'Não selecionado'}
-            </span>
-          </div>
 
-          {/* Dest folder */}
-          <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs">
-            <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Nome da Pasta Destino</div>
-            <div className="text-xs font-bold text-slate-700 truncate font-mono">
-              {settings.googleDriveDestinationFolderName || 'clientes "office"'}
+            <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs">
+              <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Identificador (portalClientId)</div>
+              <div className="text-xs font-bold text-slate-700 font-mono truncate">
+                {activePayload.portalClientId}
+              </div>
+              <span className="text-[9px] text-slate-400 block truncate">
+                Bloco: {activePayload.originBlock} / Campo: {activePayload.originField}
+              </span>
             </div>
-            <span className="text-[9px] text-slate-400 block truncate font-mono">
-              ID: {settings.googleDriveDestinationFolderId || 'Pendente de Localização'}
-            </span>
-          </div>
 
-          {/* Dest ID */}
-          <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs col-span-1 md:col-span-1">
-            <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">UID da pasta destino</div>
-            <div className="text-xs font-mono font-semibold text-slate-600 truncate">
-              {settings.googleDriveDestinationFolderId || 'Não Definido'}
+            <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs">
+              <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Status Payload</div>
+              <div className="text-xs font-bold text-emerald-600 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span>Payload Ativo e Pronto</span>
+              </div>
+              <span className="text-[9px] text-slate-400 block font-mono">
+                Source: {activePayload.sourceBuild}
+              </span>
             </div>
-            {settings.googleDriveDestinationFolderUrl ? (
-              <a
-                href={settings.googleDriveDestinationFolderUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[9.5px] text-blue-600 font-bold hover:underline inline-flex items-center gap-0.5"
-              >
-                Link da pasta destino <ExternalLink className="w-2.5 h-2.5" />
-              </a>
-            ) : (
-              <span className="text-[9px] text-slate-300">Nenhum Link Salvo</span>
-            )}
           </div>
-
-          {/* Created client folder fields */}
-          <div className="bg-white border border-slate-200 p-3.5 rounded-lg space-y-1 shadow-2xs">
-            <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Dados da Pasta Criada</div>
-            <div className="text-xs font-bold text-slate-800 truncate font-mono">
-              {activeClient?.googleDriveClientFolderName || <span className="text-slate-400 italic">Pendente</span>}
-            </div>
-            <div className="text-[9px] text-slate-400 font-mono truncate">
-              UID: {activeClient?.googleDriveClientFolderId || 'Pasta não criada'}
-            </div>
-            {activeClient?.googleDriveClientFolderUrl && (
-              <a
-                href={activeClient.googleDriveClientFolderUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] text-emerald-600 font-bold hover:underline inline-flex items-center gap-0.5 mt-1"
-              >
-                Abrir Pasta no Drive <ExternalLink className="w-2.5 h-2.5" />
-              </a>
-            )}
+        ) : (
+          <div className="py-6 text-center text-slate-450 rounded-lg bg-white border border-slate-150 border-dashed">
+            <AlertTriangle className="w-6 h-6 text-slate-350 mx-auto mb-1.5" />
+            <span className="text-xs font-bold text-slate-600 block">Aguardando dados de cadastro do Portal BOSS</span>
+            <span className="text-[10px] text-slate-400 block max-w-sm mx-auto mt-0.5">Utilize o injetor de carga acima ou envie uma chamada webhook POST real para receber os parâmetros de integração.</span>
           </div>
-
-        </div>
+        )}
       </div>
 
-      {/* Main Operational Panel Splitted into Two Separate Tracks (Rule Anti-Bug & Anti-Duplicidade) */}
+      {/* Main Operational tracks (PF/PJ) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
         
         {/* Track 1: Pessoa Física (PF) Flow */}
         <div className="bg-white border border-slate-250 rounded-xl p-5 shadow-xs flex flex-col justify-between space-y-4 relative">
-          {activeClient?.type !== 'PF' && (
-            <div className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs rounded-xl flex items-center justify-center p-6 text-center z-10">
+          {activePayload?.clientType !== 'PF' && (
+            <div className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs rounded-xl flex items-center justify-center p-6 text-center z-10 select-none">
               <div className="space-y-1.5 p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
-                <User className="w-6 h-6 text-slate-400 mx-auto" />
-                <h4 className="text-xs font-bold text-slate-700">Selecione Cliente Pessoa Física</h4>
-                <p className="text-[10px] text-slate-400 max-w-xs">Essa seção é dedicada estritamente ao processamento de PFs.</p>
+                <User className="w-5 h-5 text-slate-400 mx-auto" />
+                <h4 className="text-xs font-bold text-slate-600">Fluxo Pessoa Física Bloqueado</h4>
+                <p className="text-[10px] text-slate-400 max-w-xs">Ativo somente quando o payload do Portal BOSS for do tipo PF.</p>
               </div>
             </div>
           )}
 
           <div>
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-slate-800 font-sans">
                 <User className="w-4 h-4 text-blue-500" />
                 1. Fluxo Pessoa Física (PF)
               </span>
@@ -381,42 +310,34 @@ export function StructuredStep({
             <div className="space-y-3 pt-3">
               <div className="p-3 bg-blue-50/50 rounded-lg border border-blue-100">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Nome Recebido (nomeCompleto)</div>
-                <div className="text-xs font-bold text-slate-800 mt-1">{activeClient?.type === 'PF' ? activeClient.nomeCompleto : 'Nenhum'}</div>
+                <div className="text-xs font-bold text-slate-800 mt-1">{activePayload?.clientType === 'PF' ? activePayload.clientFolderName : 'Nenhum'}</div>
               </div>
 
-              {/* Anti-duplicity and validations indicator */}
+              {/* Validation */}
               <div className="text-[11px] leading-relaxed space-y-2">
                 <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Critérios de Validação PF:</div>
                 <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${activeClient?.nomeCompleto ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                  <span className="text-[11px] text-slate-600">Importação de Nome Ativo: <strong>{activeClient?.nomeCompleto || 'Inexistente'}</strong></span>
+                  <span className={`w-2 h-2 rounded-full ${activePayload?.clientType === 'PF' && activePayload.clientFolderName ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                  <span className="text-[11px] text-slate-600">Nome completo importado: <strong>{activePayload?.clientType === 'PF' ? activePayload.clientFolderName : 'Aguardando PF'}</strong></span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${isAuthenticated ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                  <span className={`w-2 h-2 rounded-full ${isAuthenticated ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
                   <span className="text-[11px] text-slate-600">Status Google Drive Conectado: <strong>{isAuthenticated ? 'Conectado' : 'Não autenticado'}</strong></span>
                 </div>
                 <div className="flex items-center gap-1.5 font-mono text-[10px] bg-slate-50 p-2 rounded border border-slate-200">
-                  {activeClient?.googleDriveClientFolderId ? (
-                    <span className="text-amber-800 leading-tight block">
-                      ⚠️ Rule Anti-duplicidade:<br />
-                      <strong>Pasta do cliente já criada e vinculada.</strong>
-                    </span>
-                  ) : (
-                    <span className="text-emerald-800 leading-tight block">
-                      ❇️ Pronto:<br />
-                      Nenhuma pasta ativa detectada para este cadastro. Pronto para criar.
-                    </span>
-                  )}
+                  <span className="text-emerald-800 leading-tight block">
+                    ❇️ Regra Anti-duplicidade Ativa:<br />
+                    O sistema buscará pastas existentes antes de criar nova pasta.
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Action button */}
           <div className="pt-2 border-t border-slate-100">
             <button
-              onClick={() => onCreateFolderPF(activeClient?.id)}
-              disabled={isCreatingPF || !isAuthenticated || activeClient?.googleDriveStatus === 'linked' || activeClient?.googleDriveStatus === 'created'}
+              onClick={onCreateFolderPF}
+              disabled={isCreatingPF || !isAuthenticated || activePayload?.clientType !== 'PF'}
               className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:bg-slate-100 disabled:hover:bg-slate-100 disabled:text-slate-400 font-bold text-xs py-2.5 rounded-lg text-white transition-all cursor-pointer select-none"
             >
               {isCreatingPF ? (
@@ -439,12 +360,12 @@ export function StructuredStep({
 
         {/* Track 2: Pessoa Jurídica (PJ) Flow */}
         <div className="bg-white border border-slate-250 rounded-xl p-5 shadow-xs flex flex-col justify-between space-y-4 relative">
-          {activeClient?.type !== 'PJ' && (
-            <div className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs rounded-xl flex items-center justify-center p-6 text-center z-10">
+          {activePayload?.clientType !== 'PJ' && (
+            <div className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs rounded-xl flex items-center justify-center p-6 text-center z-10 select-none">
               <div className="space-y-1.5 p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
-                <Building className="w-6 h-6 text-slate-400 mx-auto" />
-                <h4 className="text-xs font-bold text-slate-700">Selecione Cliente Pessoa Jurídica</h4>
-                <p className="text-[10px] text-slate-400 max-w-xs">Essa seção é dedicada estritamente ao processamento de PJs.</p>
+                <Building className="w-5 h-5 text-slate-400 mx-auto" />
+                <h4 className="text-xs font-bold text-slate-600">Fluxo Pessoa Jurídica Bloqueado</h4>
+                <p className="text-[10px] text-slate-400 max-w-xs">Ativo somente quando o payload do Portal BOSS for do tipo PJ.</p>
               </div>
             </div>
           )}
@@ -460,74 +381,35 @@ export function StructuredStep({
 
             <div className="space-y-3 pt-3">
               <div className="p-3 bg-emerald-50/50 rounded-lg border border-emerald-100">
-                <div className="text-[10px] font-bold text-slate-450 uppercase tracking-tight">Nome Fantasia Recebido (nomeFantasia)</div>
-                <div className="text-xs font-bold text-slate-800 mt-1">
-                  {activeClient?.type === 'PJ' ? (
-                    activeClient.nomeFantasia?.trim() ? (
-                      activeClient.nomeFantasia
-                    ) : activeClient.razaoSocial?.trim() ? (
-                      <div>
-                        <div>{activeClient.razaoSocial}</div>
-                        <span className="text-[9px] font-medium text-amber-600 block mt-0.5">
-                          usando razão social como fallback
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-rose-500 font-semibold text-[11px]">Nenhum dado PJ recebido</span>
-                    )
-                  ) : (
-                    'Nenhum'
-                  )}
-                </div>
+                <div className="text-[10px] font-bold text-slate-450 uppercase tracking-tight">Nome Fantasia Recebido (clientFolderName)</div>
+                <div className="text-xs font-bold text-slate-800 mt-1">{activePayload?.clientType === 'PJ' ? activePayload.clientFolderName : 'Nenhum'}</div>
               </div>
 
-              {/* Anti-duplicity and validations indicator for PJ */}
+              {/* Validation indicators */}
               <div className="text-[11px] leading-relaxed space-y-2">
                 <div className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Critérios de Validação PJ:</div>
                 <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${(activeClient?.nomeFantasia?.trim() || activeClient?.razaoSocial?.trim()) ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                  <span className="text-[11px] text-slate-600">
-                    Importação de Nome PJ: <strong>
-                      {activeClient?.nomeFantasia?.trim() 
-                        ? activeClient.nomeFantasia 
-                        : activeClient?.razaoSocial?.trim() 
-                          ? `${activeClient.razaoSocial} (Razão Social)` 
-                          : 'Inexistente'}
-                    </strong>
-                  </span>
+                  <span className={`w-2 h-2 rounded-full ${activePayload?.clientType === 'PJ' && activePayload.clientFolderName ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                  <span className="text-[11px] text-slate-600">Nome fantasia / Razão social: <strong>{activePayload?.clientType === 'PJ' ? activePayload.clientFolderName : 'Aguardando PJ'}</strong></span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${isAuthenticated ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                  <span className={`w-2 h-2 rounded-full ${isAuthenticated ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
                   <span className="text-[11px] text-slate-600">Status Google Drive Conectado: <strong>{isAuthenticated ? 'Conectado' : 'Não autenticado'}</strong></span>
                 </div>
                 <div className="flex items-center gap-1.5 font-mono text-[10px] bg-slate-50 p-2 rounded border border-slate-200">
-                  {activeClient?.googleDriveClientFolderId ? (
-                    <span className="text-amber-800 leading-tight block">
-                      ⚠️ Rule Anti-duplicidade:<br />
-                      <strong>Pasta do cliente já criada e vinculada.</strong>
-                    </span>
-                  ) : (
-                    <span className="text-emerald-800 leading-tight block">
-                      ❇️ Pronto:<br />
-                      Nenhuma pasta activa detectada para este cadastro. Pronto para criar.
-                    </span>
-                  )}
+                  <span className="text-emerald-800 leading-tight block">
+                    ❇️ Regra Anti-duplicidade Ativa:<br />
+                    O sistema buscará pastas existentes antes de criar nova pasta.
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Action button for PJ */}
           <div className="pt-2 border-t border-slate-100">
             <button
-              onClick={() => onCreateFolderPJ(activeClient?.id)}
-              disabled={
-                isCreatingPJ || 
-                !isAuthenticated || 
-                activeClient?.googleDriveStatus === 'linked' || 
-                activeClient?.googleDriveStatus === 'created' ||
-                !(activeClient?.nomeFantasia?.trim() || activeClient?.razaoSocial?.trim())
-              }
+              onClick={onCreateFolderPJ}
+              disabled={isCreatingPJ || !isAuthenticated || activePayload?.clientType !== 'PJ'}
               className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:bg-slate-100 disabled:hover:bg-slate-100 disabled:text-slate-400 font-bold text-xs py-2.5 rounded-lg text-white transition-all cursor-pointer select-none"
             >
               {isCreatingPJ ? (
@@ -540,7 +422,7 @@ export function StructuredStep({
                 </>
               ) : (
                 <>
-                  <FolderPlus className="w-3.5 h-3.5 animate-pulse" />
+                  <FolderPlus className="w-3.5 h-3.5" />
                   <span>Criar Pasta — Pessoa Jurídica</span>
                 </>
               )}
@@ -550,7 +432,64 @@ export function StructuredStep({
 
       </div>
 
-      {/* Terminal / Live Feed specifically for UI feedback */}
+      {/* Section 5: Retorno para o Portal BOSS */}
+      {activeResponse && (
+        <div className="bg-slate-900 rounded-xl p-5 border border-slate-950 shadow-md space-y-4 animate-fade-in text-white">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <FolderOpen className="w-4 h-4 text-emerald-400" />
+              <span>Retorno para o Portal BOSS</span>
+            </h3>
+            <button
+              onClick={handleCopyResponse}
+              className="text-[10px] text-emerald-400 hover:text-emerald-350 font-mono transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Copiar retorno para o Portal BOSS
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-950/45 p-3 rounded border border-slate-800 font-mono">
+              <div className="text-[9px] text-slate-500 uppercase font-black">Pasta do Cliente Criada</div>
+              <div className="text-xs font-bold text-slate-200 truncate mt-0.5">{activeResponse.googleDriveClientFolderName}</div>
+            </div>
+            <div className="bg-slate-950/45 p-3 rounded border border-slate-800 font-mono col-span-1 lg:col-span-2">
+              <div className="text-[9px] text-slate-500 uppercase font-black">Identificador Google Drive (UID)</div>
+              <div className="text-xs font-bold text-emerald-300 truncate mt-0.5">{activeResponse.googleDriveClientFolderId}</div>
+            </div>
+            <div className="bg-slate-950/45 p-3 rounded border border-slate-800 font-mono">
+              <div className="text-[9px] text-slate-500 uppercase font-black">Status de Registro Giffoni</div>
+              <div className="mt-1">
+                {activeResponse.googleDriveOperation === 'created' ? (
+                  <span className="text-[10.5px] font-bold px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-800">CRIADO</span>
+                ) : (
+                  <span className="text-[10.5px] font-bold px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-800">VINCULADO</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-950 p-4 rounded border border-slate-800">
+            <div className="text-[10px] text-slate-450 uppercase font-black mb-1.5 flex items-center justify-between">
+              <span>Conteúdo JSON de Retorno</span>
+              {activeResponse.googleDriveClientFolderUrl && (
+                <a
+                  href={activeResponse.googleDriveClientFolderUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-400 hover:underline flex items-center gap-1 font-sans font-bold"
+                >
+                  Abrir pasta criada no Google Drive <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+            </div>
+            <pre className="text-[10px] font-mono text-emerald-300 overflow-x-auto overflow-y-auto max-h-[140px] whitespace-pre-wrap">{JSON.stringify(activeResponse, null, 2)}</pre>
+          </div>
+        </div>
+      )}
+
+      {/* Terminal / Live Feed for UI feedback */}
       <div id="quick-logs" className="bg-slate-900 rounded-xl p-5 shadow-md space-y-3">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
           <div className="flex items-center gap-2">
@@ -585,7 +524,7 @@ export function StructuredStep({
             logs.map(log => (
               <div key={log.id} className="flex items-start gap-2 text-slate-300">
                 <span className="text-slate-500">[{log.timestamp}]</span>
-                <span className={`font-semibold shrink-0 ${log.type === 'error' ? 'text-rose-450 text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <span className={`font-semibold shrink-0 ${log.type === 'error' ? 'text-rose-400' : log.type === 'success' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   [{log.type.toUpperCase()}]
                 </span>
                 <span className="text-slate-200">{log.message}</span>
