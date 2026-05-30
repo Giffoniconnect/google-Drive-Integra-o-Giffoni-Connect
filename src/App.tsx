@@ -28,6 +28,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'flow' | 'settings'>('flow');
   const [activePayload, setActivePayload] = useState<BossPayload | null>(null);
   const [activeResponse, setActiveResponse] = useState<BossResponse | null>(null);
+  const [receiverStatus, setReceiverStatus] = useState<string>('Aguardando payload');
   const [settings, setSettings] = useState<IntegrationSettings>(INITIAL_SETTINGS);
   const [logs, setLogs] = useState<IntegrationLog[]>([]);
   
@@ -66,7 +67,8 @@ export default function App() {
             userEmail,
             settings,
             activePayload,
-            activeResponse
+            activeResponse,
+            receiverStatus
           })
         });
       } catch (err) {
@@ -76,7 +78,7 @@ export default function App() {
     if (accessToken) {
       syncWithServer();
     }
-  }, [accessToken, userEmail, settings, activePayload, activeResponse]);
+  }, [accessToken, userEmail, settings, activePayload, activeResponse, receiverStatus]);
 
   // Polling para detectar requisições automáticas externas vindas do Portal BOSS ao servidor backend
   useEffect(() => {
@@ -86,13 +88,23 @@ export default function App() {
         if (response.ok) {
           const data = await response.json();
           
-          if (data.activePayload && JSON.stringify(data.activePayload) !== localStorage.getItem('boss_active_payload')) {
+          if (data.receiverStatus) {
+            setReceiverStatus(data.receiverStatus);
+          }
+
+          if (!data.activePayload) {
+            setActivePayload(null);
+            localStorage.removeItem('boss_active_payload');
+          } else if (JSON.stringify(data.activePayload) !== localStorage.getItem('boss_active_payload')) {
             setActivePayload(data.activePayload);
             localStorage.setItem('boss_active_payload', JSON.stringify(data.activePayload));
             addLog('success', 'Nova carga útil recebida via webhook do Portal BOSS.');
           }
 
-          if (data.activeResponse && JSON.stringify(data.activeResponse) !== localStorage.getItem('boss_active_response')) {
+          if (!data.activeResponse) {
+            setActiveResponse(null);
+            localStorage.removeItem('boss_active_response');
+          } else if (JSON.stringify(data.activeResponse) !== localStorage.getItem('boss_active_response')) {
             setActiveResponse(data.activeResponse);
             localStorage.setItem('boss_active_response', JSON.stringify(data.activeResponse));
             addLog('success', 'Retorno operacional do webhook gerado com sucesso.');
@@ -165,6 +177,32 @@ export default function App() {
     } else {
       addLog('info', 'Tipo de cliente identificado: PJ.');
       addLog('info', `Nome fantasia recebido: ${folderName}.`);
+    }
+  };
+
+  const handleClearReceiver = async () => {
+    setActivePayload(null);
+    setActiveResponse(null);
+    setReceiverStatus('Aguardando payload');
+    localStorage.removeItem('boss_active_payload');
+    localStorage.removeItem('boss_active_response');
+    
+    try {
+      await fetch('/api/sync-active-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken,
+          userEmail,
+          settings,
+          activePayload: null,
+          activeResponse: null,
+          receiverStatus: 'Aguardando payload'
+        })
+      });
+      addLog('info', 'Receptor limpo no servidor com sucesso.');
+    } catch (e: any) {
+      addLog('error', `Falha ao sincronizar limpeza do receptor: ${e.message || e}`);
     }
   };
 
@@ -763,6 +801,8 @@ export default function App() {
                 logs={logs}
                 onClearLogs={handleClearLogs}
                 onAddLog={addLog}
+                receiverStatus={receiverStatus}
+                onClearReceiver={handleClearReceiver}
               />
             ) : (
               <ConfigurationPage

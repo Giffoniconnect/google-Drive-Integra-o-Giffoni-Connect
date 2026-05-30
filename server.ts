@@ -39,7 +39,8 @@ let serverState = {
   },
   activePayload: null as any,
   activeResponse: null as any,
-  logs: [] as any[]
+  logs: [] as any[],
+  receiverStatus: 'Aguardando payload'
 };
 
 // Log helper
@@ -64,6 +65,16 @@ if (fs.existsSync(SESSION_FILE)) {
   } catch (e) {
     console.error('Falha ao restaurar sessão anterior:', e);
   }
+}
+
+// Ensure receiver status and boot logs are configured
+if (!serverState.receiverStatus) {
+  serverState.receiverStatus = 'Aguardando payload';
+}
+const hasInitLogs = serverState.logs.some(l => l.message === 'Receptor Portal BOSS iniciado.');
+if (!hasInitLogs) {
+  addServerLog('info', 'Receptor Portal BOSS iniciado.');
+  addServerLog('info', 'Aguardando payload do Portal BOSS.');
 }
 
 function saveSession() {
@@ -159,18 +170,29 @@ app.get('/api/get-active-state', (req, res) => {
     settings: serverState.settings,
     activePayload: serverState.activePayload,
     activeResponse: serverState.activeResponse,
+    logs: serverState.logs,
+    receiverStatus: serverState.receiverStatus || 'Aguardando payload'
+  });
+});
+
+app.get('/api/receiver-status', (req, res) => {
+  res.json({
+    status: serverState.receiverStatus || 'Aguardando payload',
+    lastPayload: serverState.activePayload,
+    lastResponse: serverState.activeResponse,
     logs: serverState.logs
   });
 });
 
 app.post('/api/sync-active-state', (req, res) => {
-  const { accessToken, userEmail, settings, logs, activePayload, activeResponse } = req.body;
+  const { accessToken, userEmail, settings, logs, activePayload, activeResponse, receiverStatus } = req.body;
   if (accessToken !== undefined) serverState.accessToken = accessToken;
   if (userEmail !== undefined) serverState.userEmail = userEmail;
   if (settings !== undefined) serverState.settings = { ...serverState.settings, ...settings };
   if (logs !== undefined) serverState.logs = logs;
   if (activePayload !== undefined) serverState.activePayload = activePayload;
   if (activeResponse !== undefined) serverState.activeResponse = activeResponse;
+  if (receiverStatus !== undefined) serverState.receiverStatus = receiverStatus;
   
   saveSession();
   res.json({ status: 'ok' });
@@ -178,11 +200,16 @@ app.post('/api/sync-active-state', (req, res) => {
 
 // Real endpoint POST /api/create-folder
 app.post('/api/create-folder', async (req, res) => {
+  addServerLog('info', 'Endpoint /api/create-folder acionado.');
+  serverState.receiverStatus = 'Processando';
+  saveSession();
+
   const { clientType, portalClientId, caseId, clientFolderName, originBlock, originField } = req.body;
   
   // Format failure output helper
   const sendFailure = (message: string) => {
     addServerLog('error', message);
+    serverState.receiverStatus = 'Erro de recepção';
     const errorResponse = {
       portalClientId: portalClientId || '',
       caseId: caseId || '',
@@ -196,7 +223,8 @@ app.post('/api/create-folder', async (req, res) => {
     return res.status(200).json(errorResponse); // Compatible response according to specs
   };
 
-  addServerLog('info', 'Solicitação de criação/localização recebida do Portal BOSS.');
+  addServerLog('info', 'Payload recebido em /api/create-folder.');
+  addServerLog('info', 'Payload recebido do Portal BOSS.');
 
   // Validations:
   if (!clientType || (clientType !== 'PF' && clientType !== 'PJ')) {
@@ -215,17 +243,23 @@ app.post('/api/create-folder', async (req, res) => {
     return sendFailure('Nome da pasta não recebido.');
   }
 
+  addServerLog('success', 'Campos obrigatórios validados.');
+
   // Active token verification
   const token = serverState.accessToken;
   if (!token) {
     return sendFailure('Verifique se o Google Drive está conectado corretamente.');
   }
 
+  addServerLog('success', 'Google Drive conectado validado.');
+
   // Active Destination Folder verification
   const destFolderId = serverState.settings.googleDriveDestinationFolderId;
   if (!destFolderId) {
     return sendFailure('Pasta de destino do Google Drive não está configurada.');
   }
+
+  addServerLog('success', 'Pasta destino configurada validada.');
 
   // Set received payload in State
   const activePayloadObj = {
@@ -235,53 +269,39 @@ app.post('/api/create-folder', async (req, res) => {
     caseId,
     clientFolderName,
     originBlock: originBlock || (clientType === 'PF' ? 'pfDadosPessoais' : 'pjDadosEmpresa'),
-    originField: originField || (clientType === 'PF' ? 'nomeCompleto' : 'nomeFantasia')
+    originField: originField || (clientType === 'PF' ? 'nomeCompleto' : 'nomeFantasia'),
+    recebidoEm: new Date().toISOString()
   };
   serverState.activePayload = activePayloadObj;
-
-  addServerLog('success', 'Payload recebido do Portal BOSS com sucesso.');
-  if (clientType === 'PF') {
-    addServerLog('info', 'Tipo de cliente identificado: PF.');
-    addServerLog('info', `Nome da pasta recebido: ${clientFolderName}.`);
-  } else {
-    addServerLog('info', 'Tipo de cliente identificado: PJ.');
-    addServerLog('info', `Nome fantasia recebido: ${clientFolderName}.`);
-  }
+  serverState.receiverStatus = 'Processando';
+  saveSession();
 
   try {
-    addServerLog('info', `Localizando pasta destino com UID: ${destFolderId}...`);
     const isDestValid = await verifyFolderByIdOnDrive(token, destFolderId);
     if (!isDestValid) {
       return sendFailure('Pasta de destino do Google Drive não existe ou foi excluída.');
     }
     
-    addServerLog('success', 'Pasta de destino localizada com sucesso.');
-    addServerLog('info', 'Regra anti-duplicidade verificada.');
-
     // Check anti-duplicity on google drive
     const searchResult = await checkFolderExistsOnDrive(token, clientFolderName, destFolderId);
+    addServerLog('success', 'Duplicidade verificada.');
     
     let folderId = '';
     let webViewLink = '';
     let operation: 'created' | 'linked' = 'created';
 
     if (searchResult.exists && searchResult.id) {
-      addServerLog('info', `Pasta já existente localizada e vinculada.`);
       folderId = searchResult.id;
       webViewLink = searchResult.webViewLink || `https://drive.google.com/drive/folders/${searchResult.id}`;
       operation = 'linked';
     } else {
-      addServerLog('info', `Criando nova pasta de cliente: "${clientFolderName}"...`);
       const createResult = await createFolderOnDrive(token, clientFolderName, destFolderId);
       folderId = createResult.id;
       webViewLink = createResult.webViewLink;
       operation = 'created';
-      if (clientType === 'PF') {
-        addServerLog('success', 'Pasta criada com sucesso.');
-      } else {
-        addServerLog('success', 'Pasta da Pessoa Jurídica criada com sucesso.');
-      }
     }
+
+    addServerLog('success', 'Pasta criada/localizada.');
 
     const responsePayload = {
       portalClientId,
@@ -297,8 +317,10 @@ app.post('/api/create-folder', async (req, res) => {
     };
 
     serverState.activeResponse = responsePayload;
+    serverState.receiverStatus = 'Retorno gerado';
     saveSession();
-    addServerLog('success', 'Retorno para o Portal BOSS gerado com sucesso.');
+    addServerLog('success', 'Retorno gerado para Portal BOSS.');
+    addServerLog('success', 'Resposta enviada ao Portal BOSS.');
 
     return res.status(200).json(responsePayload);
 

@@ -24,6 +24,7 @@ export interface BossPayload {
   originField: string; // "nomeCompleto" | "nomeFantasia"
   razaoSocial?: string; // fallback
   documento?: string; // fallback
+  recebidoEm?: string; // timestamp when payload arrived at receiver
 }
 
 export interface BossResponse {
