@@ -1,22 +1,11 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useState, useEffect } from 'react';
 import { 
-  FolderLock, 
   Settings, 
   FileText, 
-  ExternalLink, 
-  Compass, 
-  Info,
-  CheckCircle,
-  HelpCircle,
-  LogIn
+  FolderLock
 } from 'lucide-react';
 import { Client, IntegrationSettings, IntegrationLog } from './types';
-import { initAuth, googleSignIn, logout, getAccessToken, setAccessToken } from './lib/firebase';
+import { initAuth, googleSignIn, logout, setAccessToken } from './lib/firebase';
 import { checkFolderExists, createFolder, testConnection } from './lib/drive';
 import { ConfigurationPage } from './components/ConfigurationPage';
 import { StructuredStep } from './components/StructuredStep';
@@ -47,14 +36,22 @@ const INITIAL_CLIENTS: Client[] = [
     type: 'PJ',
     nomeCompleto: '',
     razaoSocial: 'Boss Hub Consultoria LTDA',
+    nomeFantasia: 'Boss Hub',
     documento: '88.888.888/0001-88',
   }
 ];
 
 const INITIAL_SETTINGS: IntegrationSettings = {
-  rootFolderId: '',
-  rootFolderName: 'Raiz Geral do Drive',
-  status: 'disconnected',
+  googleDriveConnectedEmail: 'direito.rgr@gmail.com',
+  googleDriveConnectionStatus: 'disconnected',
+  googleDriveApiKey: '',
+  googleDriveClientId: '',
+  googleDriveClientSecret: '',
+  googleDriveRedirectUri: 'https://ais-pre-dg4bxdc7rv3rtl5g75fdsi-599536317399.us-east1.run.app/oauth/callback',
+  googleDriveScopes: 'https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/drive',
+  googleDriveDestinationFolderName: 'clientes office',
+  googleDriveDestinationFolderId: '',
+  googleDriveDestinationFolderUrl: '',
 };
 
 export default function App() {
@@ -64,12 +61,15 @@ export default function App() {
   const [settings, setSettings] = useState<IntegrationSettings>(INITIAL_SETTINGS);
   const [logs, setLogs] = useState<IntegrationLog[]>([]);
   
-  // Auth state
+  // Auth states
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [accessToken, setAccessTokenState] = useState<string | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [isActionLoading, setIsActionLoading] = useState(false);
+  
+  // Isolated track loaders (Anti-Bug / Separated tracks)
+  const [isCreatingPF, setIsCreatingPF] = useState(false);
+  const [isCreatingPJ, setIsCreatingPJ] = useState(false);
   const [isTestLoading, setIsTestLoading] = useState(false);
 
   // Helper to push systemic logs
@@ -108,14 +108,18 @@ export default function App() {
     const storedSettings = localStorage.getItem('boss_drive_settings');
     if (storedSettings) {
       try {
-        setSettings(JSON.parse(storedSettings));
+        const parsedSetting = JSON.parse(storedSettings);
+        setSettings(prev => ({ ...prev, ...parsedSetting }));
       } catch (e) {
         setSettings(INITIAL_SETTINGS);
       }
+    } else {
+      setSettings(INITIAL_SETTINGS);
+      localStorage.setItem('boss_drive_settings', JSON.stringify(INITIAL_SETTINGS));
     }
 
     // 3. Welcome log
-    addLog('info', 'Portal BOSS Clientes — Console de Integração Carregado.');
+    addLog('info', 'Integração Google Drive Giffoni Connect — Console Pronta.');
   }, []);
 
   // Sync clients to localStorage when edited
@@ -126,9 +130,11 @@ export default function App() {
 
   // Sync settings to localStorage when edited
   const handleSaveSettings = (newSettingsFields: Partial<IntegrationSettings>) => {
-    const val = { ...settings, ...newSettingsFields };
-    setSettings(val);
-    localStorage.setItem('boss_drive_settings', JSON.stringify(val));
+    setSettings(prev => {
+      const val = { ...prev, ...newSettingsFields };
+      localStorage.setItem('boss_drive_settings', JSON.stringify(val));
+      return val;
+    });
   };
 
   const handleClearLogs = () => {
@@ -143,15 +149,18 @@ export default function App() {
         setUserEmail(user.email);
         setAccessTokenState(token);
         setAccessToken(token); // set in memory inside firebase module
-        handleSaveSettings({ status: 'connected' });
-        addLog('success', `Autenticação restaurada com sucesso para: ${user.email}`);
+        handleSaveSettings({ 
+          googleDriveConnectionStatus: 'connected',
+          googleDriveConnectedEmail: user.email || '' 
+        });
+        addLog('success', `Autenticação Google ativa para: ${user.email}`);
       },
       () => {
         setIsAuthenticated(false);
         setUserEmail(null);
         setAccessTokenState(null);
         setAccessToken(null);
-        handleSaveSettings({ status: 'disconnected' });
+        handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
       }
     );
     return () => unsubscribe();
@@ -159,103 +168,144 @@ export default function App() {
 
   const handleLogin = async () => {
     setIsAuthenticating(true);
-    addLog('info', 'Solicitando login via Google Autenticação...');
+    addLog('info', 'Solicitando autenticação Google...');
     try {
       const res = await googleSignIn();
       if (res) {
         setIsAuthenticated(true);
         setUserEmail(res.user.email);
         setAccessTokenState(res.accessToken);
-        handleSaveSettings({ status: 'connected' });
-        addLog('success', `Conectado com sucesso ao Google Drive! Conta: ${res.user.email}`);
+        handleSaveSettings({ 
+          googleDriveConnectionStatus: 'connected',
+          googleDriveConnectedEmail: res.user.email || '' 
+        });
+        addLog('success', `Conectado ao Google Drive com sucesso! Conta: ${res.user.email}`);
       }
     } catch (err: any) {
-      addLog('error', `Falha no Login: ${err.message || err}`);
-      handleSaveSettings({ status: 'error' });
+      addLog('error', `Falha na conexão: ${err.message || err}`);
+      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
+      handleSaveSettings({ googleDriveConnectionStatus: 'error' });
     } finally {
       setIsAuthenticating(false);
     }
   };
 
   const handleLogout = async () => {
-    addLog('info', 'Fazer logout da conta Google...');
+    addLog('info', 'Revogando token de acesso do Google Drive...');
     try {
       await logout();
       setIsAuthenticated(false);
       setUserEmail(null);
       setAccessTokenState(null);
-      handleSaveSettings({ status: 'disconnected' });
-      addLog('warning' as any, 'Conta desconectada. Credenciais revogadas.');
+      handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
+      addLog('info', 'Desconectado. Credenciais e tokens limpos.');
     } catch (err: any) {
-      addLog('error', `Falha no logout: ${err.message || err}`);
+      addLog('error', `Erro ao desconectar: ${err.message || err}`);
     }
   };
 
   const handleTestConnection = async () => {
     if (!accessToken) {
-      addLog('error', 'Token de acesso inválido ou expirado. Re-autentique.');
+      addLog('error', 'Token de acesso indisponível. Conecte ao Google Drive primeiro.');
       return;
     }
     setIsTestLoading(true);
-    addLog('info', 'Testando conexão ativa com a Google Drive REST API...');
+    addLog('info', 'Testando canais de comunicação com a Drive REST API...');
     try {
       const ok = await testConnection(accessToken);
       if (ok) {
-        addLog('success', 'Conexão e token válidos! Google Drive respondeu com status 200 OK.');
-        handleSaveSettings({ status: 'connected' });
+        addLog('success', 'Conexão validada! Google Drive API respondeu 200 OK.');
+        handleSaveSettings({ googleDriveConnectionStatus: 'connected' });
       } else {
-        addLog('error', 'Falha no teste: A API respondeu com erro de autenticação.');
-        handleSaveSettings({ status: 'error' });
+        addLog('error', 'Falha na conexão de teste. Re-autorização necessária.');
+        handleSaveSettings({ googleDriveConnectionStatus: 'error' });
       }
     } catch (err: any) {
       addLog('error', `Falha ao testar conexão: ${err.message || err}`);
-      handleSaveSettings({ status: 'error' });
+      addLog('error', 'Verifique se a chave de API/credenciais foram configuradas.');
+      handleSaveSettings({ googleDriveConnectionStatus: 'error' });
     } finally {
       setIsTestLoading(false);
     }
   };
 
-  // MAIN TASK logic: CREATE FOLDER
-  const handleCreateFolder = async (clientId: string) => {
+  /**
+   * SEPARATED FLOW: PESSOA FÍSICA (PF)
+   * Focuses on `nomeCompleto`
+   */
+  const handleCreateFolderPF = async (clientId: string) => {
     const client = clients.find(c => c.id === clientId);
     if (!client) {
-      addLog('error', 'Erro interno: Cliente selecionado não existente.');
+      addLog('error', 'Não foi possível importar o nome do cliente.');
       return;
     }
+
+    if (!client.nomeCompleto || client.nomeCompleto.trim() === '') {
+      addLog('error', 'Não foi possível importar o nome do cliente.');
+      return;
+    }
+
+    addLog('success', 'Nome completo da Pessoa Física recebido do Portal BOSS com sucesso.');
 
     if (!accessToken) {
-      addLog('error', 'Operação bloqueada: Autenticação Google Drive requerida.');
+      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
       return;
     }
 
-    setIsActionLoading(true);
-
-    // Resolve name according to rules
-    let resolvedFolderName = '';
-    if (client.type === 'PF') {
-      resolvedFolderName = client.nomeCompleto.trim();
-    } else {
-      resolvedFolderName = (client.nomeFantasia || client.razaoSocial || '').trim();
-    }
-
-    if (!resolvedFolderName) {
-      resolvedFolderName = `Cliente ID ${client.id}`;
-    }
-
-    addLog('info', `Iniciando verificação de existência para pasta do cliente: "${resolvedFolderName}"...`);
+    setIsCreatingPF(true);
 
     try {
-      // 1. Duplication Check
-      const checkResult = await checkFolderExists(accessToken, resolvedFolderName, settings.rootFolderId);
-      
+      const resolvedFolderName = client.nomeCompleto.trim();
+      let destFolderId = settings.googleDriveDestinationFolderId;
+
+      // Locate destination folder
+      addLog('info', `Localizando pasta de destino "${settings.googleDriveDestinationFolderName}"...`);
+      if (!destFolderId) {
+        // search for "clientes office"
+        const foundDest = await checkFolderExists(accessToken, settings.googleDriveDestinationFolderName);
+        if (foundDest.exists && foundDest.id) {
+          destFolderId = foundDest.id;
+          handleSaveSettings({
+            googleDriveDestinationFolderId: foundDest.id,
+            googleDriveDestinationFolderUrl: foundDest.webViewLink || `https://drive.google.com/drive/folders/${foundDest.id}`
+          });
+        } else {
+          // create destination folder if missing altogether
+          addLog('info', `Pasta destino "${settings.googleDriveDestinationFolderName}" não localizada no sandbox. Criando...`);
+          const createdDest = await createFolder(accessToken, settings.googleDriveDestinationFolderName);
+          destFolderId = createdDest.id;
+          handleSaveSettings({
+            googleDriveDestinationFolderId: createdDest.id,
+            googleDriveDestinationFolderUrl: createdDest.webViewLink
+          });
+        }
+      }
+
+      if (!destFolderId) {
+        addLog('error', 'Não foi possível localizar a pasta de destino.');
+        setIsCreatingPF(false);
+        return;
+      }
+
+      addLog('success', 'Pasta de destino localizada com sucesso.');
+
+      // Anti-duplicity check
+      if (client.googleDriveClientFolderId && client.googleDriveStatus === 'linked') {
+        addLog('info', 'Pasta do cliente já criada e vinculada.');
+        setIsCreatingPF(false);
+        return;
+      }
+
+      // Check Google Drive query for existence
+      const checkResult = await checkFolderExists(accessToken, resolvedFolderName, destFolderId);
       if (checkResult.exists && checkResult.id) {
-        // Recover existing link without duplication
-        addLog('success', `Pasta do cliente encontrada! Vinculando ao registro existente ID: ${checkResult.id}`);
+        addLog('info', 'Pasta do cliente já criada e vinculada.');
         
         const updatedClients = clients.map(c => {
           if (c.id === clientId) {
             return {
               ...c,
+              googleDriveClientFolderName: resolvedFolderName,
               googleDriveClientFolderId: checkResult.id,
               googleDriveClientFolderUrl: checkResult.webViewLink,
               googleDriveCreatedAt: c.googleDriveCreatedAt || new Date().toISOString(),
@@ -264,24 +314,22 @@ export default function App() {
           }
           return c;
         });
-
         saveClients(updatedClients);
-        addLog('info', `Pasta do cliente "${resolvedFolderName}" vinculada com sucesso conforme regra de não duplicidade.`);
-        setIsActionLoading(false);
+        setIsCreatingPF(false);
         return;
       }
 
-      // 2. Create New Folder If Not Found
-      addLog('info', `Pasta inexistente. Criando nova pasta "${resolvedFolderName}" no Google Drive...`);
-      const createResult = await createFolder(accessToken, resolvedFolderName, settings.rootFolderId);
+      // Execute Folder Creation for PF
+      const createdFolderResult = await createFolder(accessToken, resolvedFolderName, destFolderId);
 
       const timestamp = new Date().toISOString();
       const updatedClients = clients.map(c => {
         if (c.id === clientId) {
           return {
             ...c,
-            googleDriveClientFolderId: createResult.id,
-            googleDriveClientFolderUrl: createResult.webViewLink,
+            googleDriveClientFolderName: resolvedFolderName,
+            googleDriveClientFolderId: createdFolderResult.id,
+            googleDriveClientFolderUrl: createdFolderResult.webViewLink,
             googleDriveCreatedAt: timestamp,
             googleDriveStatus: 'created' as const,
           };
@@ -290,41 +338,161 @@ export default function App() {
       });
 
       saveClients(updatedClients);
-      addLog('success', `Pasta do cliente "${resolvedFolderName}" criada com sucesso! Link: ${createResult.webViewLink}`);
+      addLog('success', 'Pasta da Pessoa Física criada com sucesso.');
 
-    } catch (error: any) {
-      console.error(error);
-      addLog('error', `Falha na operação: ${error.message || error}`);
+    } catch (err: any) {
+      console.error(err);
+      addLog('error', 'Não foi possível criar a pasta do cliente.');
+      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
+      addLog('error', 'Verifique se a chave de API/credenciais foram configuradas.');
     } finally {
-      setIsActionLoading(false);
+      setIsCreatingPF(false);
+    }
+  };
+
+  /**
+   * SEPARATED FLOW: PESSOA JURÍDICA (PJ)
+   * Focuses on `nomeFantasia`
+   */
+  const handleCreateFolderPJ = async (clientId: string) => {
+    const client = clients.find(c => c.id === clientId);
+    if (!client) {
+      addLog('error', 'Não foi possível importar o nome do cliente.');
+      return;
+    }
+
+    if (!client.nomeFantasia || client.nomeFantasia.trim() === '') {
+      addLog('error', 'Não foi possível importar o nome do cliente.');
+      return;
+    }
+
+    addLog('success', 'Nome fantasia da Pessoa Jurídica recebido do Portal BOSS com sucesso.');
+
+    if (!accessToken) {
+      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
+      return;
+    }
+
+    setIsCreatingPJ(true);
+
+    try {
+      const resolvedFolderName = client.nomeFantasia.trim();
+      let destFolderId = settings.googleDriveDestinationFolderId;
+
+      // Locate destination folder
+      addLog('info', `Localizando pasta de destino "${settings.googleDriveDestinationFolderName}"...`);
+      if (!destFolderId) {
+        const foundDest = await checkFolderExists(accessToken, settings.googleDriveDestinationFolderName);
+        if (foundDest.exists && foundDest.id) {
+          destFolderId = foundDest.id;
+          handleSaveSettings({
+            googleDriveDestinationFolderId: foundDest.id,
+            googleDriveDestinationFolderUrl: foundDest.webViewLink || `https://drive.google.com/drive/folders/${foundDest.id}`
+          });
+        } else {
+          addLog('info', `Pasta destino "${settings.googleDriveDestinationFolderName}" não localizada no sandbox. Criando...`);
+          const createdDest = await createFolder(accessToken, settings.googleDriveDestinationFolderName);
+          destFolderId = createdDest.id;
+          handleSaveSettings({
+            googleDriveDestinationFolderId: createdDest.id,
+            googleDriveDestinationFolderUrl: createdDest.webViewLink
+          });
+        }
+      }
+
+      if (!destFolderId) {
+        addLog('error', 'Não foi possível localizar a pasta de destino.');
+        setIsCreatingPJ(false);
+        return;
+      }
+
+      addLog('success', 'Pasta de destino localizada com sucesso.');
+
+      // Anti-duplicity check
+      if (client.googleDriveClientFolderId && client.googleDriveStatus === 'linked') {
+        addLog('info', 'Pasta do cliente já criada e vinculada.');
+        setIsCreatingPJ(false);
+        return;
+      }
+
+      // Check Google Drive query for existence
+      const checkResult = await checkFolderExists(accessToken, resolvedFolderName, destFolderId);
+      if (checkResult.exists && checkResult.id) {
+        addLog('info', 'Pasta do cliente já criada e vinculada.');
+        
+        const updatedClients = clients.map(c => {
+          if (c.id === clientId) {
+            return {
+              ...c,
+              googleDriveClientFolderName: resolvedFolderName,
+              googleDriveClientFolderId: checkResult.id,
+              googleDriveClientFolderUrl: checkResult.webViewLink,
+              googleDriveCreatedAt: c.googleDriveCreatedAt || new Date().toISOString(),
+              googleDriveStatus: 'linked' as const,
+            };
+          }
+          return c;
+        });
+        saveClients(updatedClients);
+        setIsCreatingPJ(false);
+        return;
+      }
+
+      // Execute Folder Creation for PJ
+      const createdFolderResult = await createFolder(accessToken, resolvedFolderName, destFolderId);
+
+      const timestamp = new Date().toISOString();
+      const updatedClients = clients.map(c => {
+        if (c.id === clientId) {
+          return {
+            ...c,
+            googleDriveClientFolderName: resolvedFolderName,
+            googleDriveClientFolderId: createdFolderResult.id,
+            googleDriveClientFolderUrl: createdFolderResult.webViewLink,
+            googleDriveCreatedAt: timestamp,
+            googleDriveStatus: 'created' as const,
+          };
+        }
+        return c;
+      });
+
+      saveClients(updatedClients);
+      addLog('success', 'Pasta da Pessoa Jurídica criada com sucesso.');
+
+    } catch (err: any) {
+      console.error(err);
+      addLog('error', 'Não foi possível criar a pasta do cliente.');
+      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
+      addLog('error', 'Verifique se a chave de API/credenciais foram configuradas.');
+    } finally {
+      setIsCreatingPJ(false);
     }
   };
 
   const handleAddClient = (newClient: Client) => {
     const updated = [...clients, newClient];
     saveClients(updated);
-    addLog('info', `Simulador: Novo cliente "${newClient.nomeCompleto || newClient.nomeFantasia || newClient.razaoSocial}" adicionado.`);
+    addLog('info', `Novo cadastro importado para o simulador Giffoni: ${newClient.nomeCompleto || newClient.nomeFantasia}`);
   };
-
-  const activeClient = clients.find(c => c.id === selectedClientId) || clients[0];
 
   return (
     <div id="main-app" className="min-h-screen bg-slate-50 flex font-sans text-slate-900 select-none antialiased">
+      
       {/* Sidebar Navigation */}
       <aside className="w-68 bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-950">
         <div className="p-5 flex items-center gap-3 border-b border-slate-800">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white shadow-sm shadow-blue-500/25">
-            B
+            G
           </div>
           <div>
-            <span className="font-semibold text-white tracking-tight block text-sm">Portal BOSS</span>
-            <span className="text-[10px] text-slate-500 block -mt-0.5 font-mono">Giffoni Connect</span>
+            <span className="font-semibold text-white tracking-tight block text-sm">Giffoni Connect</span>
+            <span className="text-[10px] text-slate-500 block -mt-0.5 font-mono">Integração Drive</span>
           </div>
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2 px-2 select-none">
-            Fluxo de Produção
+            Módulos Operacionais
           </div>
           <button
             onClick={() => setActiveTab('flow')}
@@ -334,12 +502,12 @@ export default function App() {
                 : 'text-slate-400 hover:bg-slate-850 hover:text-slate-200'
             }`}
           >
-            <FileText className={`w-4 h-4 ${activeTab === 'flow' ? 'text-blue-500' : 'text-slate-500'}`} />
-            <span>Automação de Criar Pasta a partir do nome do cliente no cadastro</span>
+            <FolderLock className={`w-4 h-4 ${activeTab === 'flow' ? 'text-blue-500' : 'text-slate-500'}`} />
+            <span>Criar Pasta do Cliente</span>
           </button>
 
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-6 mb-2 px-2 select-none">
-            Geral
+            Ajustes de API
           </div>
           <button
             onClick={() => setActiveTab('settings')}
@@ -357,10 +525,10 @@ export default function App() {
         {/* Info box at sidebar bottom */}
         <div className="p-4 border-t border-slate-850 bg-slate-950/20 text-[11px] text-slate-550 space-y-1">
           <div className="font-semibold text-slate-450 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-            Drive API Ativa
+            <span className={`w-1.5 h-1.5 rounded-full ${isAuthenticated ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+            {isAuthenticated ? 'Status: Conectado' : 'Status: Off-line'}
           </div>
-          <div className="text-[10px] text-slate-500 font-mono">Build v1.0.4 Stable</div>
+          <div className="text-[10px] text-slate-500 font-mono">Build v1.2.0 Stable</div>
         </div>
       </aside>
 
@@ -369,32 +537,24 @@ export default function App() {
         {/* Top Header */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 shadow-xs">
           <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-            <span>Portal BOSS</span>
+            <span>Integração Google Drive</span>
             <span className="text-slate-300">/</span>
             {activeTab === 'flow' ? (
-              <>
-                <span>Fluxo de Produção</span>
-                <span className="text-slate-300">/</span>
-                <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
-                  Automação de Criar Pasta a partir do nome do cliente no cadastro
-                </span>
-              </>
+              <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
+                Criar Pasta do Cliente no Google Drive
+              </span>
             ) : (
-              <>
-                <span>Configurações</span>
-                <span className="text-slate-300">/</span>
-                <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
-                  Integrações Google Drive
-                </span>
-              </>
+              <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
+                Configurações Drive
+              </span>
             )}
           </div>
 
           {/* Quick Active Operator Widget */}
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-xs font-bold text-slate-900">Admin Giffoni</div>
-              <div className="text-[9.5px] text-slate-400 font-medium -mt-0.5 uppercase tracking-wide">Operador BOSS</div>
+              <div className="text-xs font-bold text-slate-900">{userEmail || 'direito.rgr@gmail.com'}</div>
+              <div className="text-[9.5px] text-slate-400 font-medium -mt-0.5 uppercase tracking-wide">Conta Destino</div>
             </div>
             
             {isAuthenticated ? (
@@ -415,7 +575,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Real-world Interactive Workspace */}
+        {/* Workspace content wrapper */}
         <div className="p-8 flex-1 flex flex-col justify-between min-h-[500px]">
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6 sm:p-8">
             {activeTab === 'flow' ? (
@@ -423,11 +583,16 @@ export default function App() {
                 clients={clients}
                 selectedClientId={selectedClientId}
                 onSelectClient={setSelectedClientId}
-                onCreateFolder={handleCreateFolder}
-                isCreating={isActionLoading}
+                onCreateFolderPF={handleCreateFolderPF}
+                onCreateFolderPJ={handleCreateFolderPJ}
+                isCreatingPF={isCreatingPF}
+                isCreatingPJ={isCreatingPJ}
                 isAuthenticated={isAuthenticated}
                 onLogin={handleLogin}
                 onAddClient={handleAddClient}
+                settings={settings}
+                logs={logs}
+                onClearLogs={handleClearLogs}
               />
             ) : (
               <ConfigurationPage
@@ -447,20 +612,20 @@ export default function App() {
             )}
           </div>
 
-          {/* Quick Legend / Info Bar precisely matching "Professional Polish" Design */}
+          {/* Footer Bar */}
           <footer className="mt-8 pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex gap-6">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-blue-600 shadow-xs"></div>
-                <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">Criação Automática</span>
+                <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">Criação Isolada PF/PJ</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-slate-400 border border-slate-300"></div>
-                <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">Prevenção de Duplicidade</span>
+                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-xs"></div>
+                <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">Regra Anti-Duplicidade</span>
               </div>
             </div>
             <div className="text-[11px] text-slate-400 font-medium">
-              Garantindo integridade entre o <strong className="text-slate-600">Fluxo 1.6</strong> e a <strong className="text-slate-600">API Google Drive</strong>
+              Giffoni Connect • Conexão com <strong className="text-slate-600">clientes office</strong>
             </div>
           </footer>
         </div>
@@ -468,4 +633,3 @@ export default function App() {
     </div>
   );
 }
-

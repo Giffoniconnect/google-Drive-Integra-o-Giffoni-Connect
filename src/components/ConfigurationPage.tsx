@@ -1,21 +1,22 @@
 import { useState } from 'react';
 import { 
   Settings, 
-  Folder, 
   Terminal, 
   CheckCircle, 
   XCircle, 
   Info, 
-  ExternalLink, 
   RefreshCw, 
   LogOut, 
   Trash2, 
-  FileCheck,
-  FolderOpen
+  FolderOpen,
+  Key,
+  Shield,
+  Briefcase,
+  Mail,
+  ToggleLeft
 } from 'lucide-react';
 import { IntegrationSettings, IntegrationLog } from '../types';
 import { GSIButton } from './GSIButton';
-import { createFolder } from '../lib/drive';
 
 interface ConfigurationPageProps {
   isAuthenticated: boolean;
@@ -46,198 +47,292 @@ export function ConfigurationPage({
   isTesting,
   onAddLog
 }: ConfigurationPageProps) {
-  const [manualFolderId, setManualFolderId] = useState(settings.rootFolderId);
-  const [manualFolderName, setManualFolderName] = useState(settings.rootFolderName);
-  const [isCreatingRootFolder, setIsCreatingRootFolder] = useState(false);
+  // Configured states
+  const [email, setEmail] = useState(settings.googleDriveConnectedEmail || 'direito.rgr@gmail.com');
+  const [statusVal, setStatusVal] = useState(settings.googleDriveConnectionStatus || 'disconnected');
+  const [apiKey, setApiKey] = useState(settings.googleDriveApiKey || '');
+  const [clientId, setClientId] = useState(settings.googleDriveClientId || '');
+  const [clientSecret, setClientSecret] = useState(settings.googleDriveClientSecret || '');
+  const [redirectUri, setRedirectUri] = useState(settings.googleDriveRedirectUri || '');
+  const [scopesVal, setScopesVal] = useState(settings.googleDriveScopes || 'https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/drive');
 
-  const handleSaveManualRoot = () => {
+  // Destination Folder config
+  const [destName, setDestName] = useState(settings.googleDriveDestinationFolderName || 'clientes office');
+  const [destId, setDestId] = useState(settings.googleDriveDestinationFolderId || '');
+  const [destUrl, setDestUrl] = useState(settings.googleDriveDestinationFolderUrl || '');
+
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveConfigs = () => {
+    setSaving(true);
+    
     onSaveSettings({
-      rootFolderId: manualFolderId.trim(),
-      rootFolderName: manualFolderName.trim() || 'Raiz do Google Drive',
+      googleDriveConnectedEmail: email,
+      googleDriveConnectionStatus: isAuthenticated ? 'connected' : 'disconnected',
+      googleDriveApiKey: apiKey,
+      googleDriveClientId: clientId,
+      googleDriveClientSecret: clientSecret,
+      googleDriveRedirectUri: redirectUri,
+      googleDriveScopes: scopesVal,
+      googleDriveDestinationFolderName: destName,
+      googleDriveDestinationFolderId: destId,
+      googleDriveDestinationFolderUrl: destUrl,
     });
-    onAddLog('info', `Pasta raiz alterada manualmente para ID: "${manualFolderId}" (${manualFolderName || 'Sem Nome'})`);
-  };
 
-  const handleCreateDefaultRoot = async () => {
-    if (!accessToken) {
-      onAddLog('error', 'Token de acesso inválido. Por favor, conecte a sua conta.');
-      return;
-    }
-    setIsCreatingRootFolder(true);
-    onAddLog('info', "Iniciando criação automática da pasta raiz 'Portal BOSS Clientes'...");
-    try {
-      const response = await createFolder(accessToken, 'Portal BOSS Clientes');
-      onSaveSettings({
-        rootFolderId: response.id,
-        rootFolderName: 'Portal BOSS Clientes',
-      });
-      setManualFolderId(response.id);
-      setManualFolderName('Portal BOSS Clientes');
-      onAddLog('success', `Pasta raiz 'Portal BOSS Clientes' criada com sucesso! ID: ${response.id}`);
-    } catch (error: any) {
-      console.error(error);
-      onAddLog('error', `Falha ao criar pasta raiz: ${error.message || error}`);
-    } finally {
-      setIsCreatingRootFolder(false);
-    }
+    onAddLog('success', 'Configurações do Google Drive atualizadas e salvas no Portal BOSS localmente com sucesso.');
+    
+    setTimeout(() => {
+      setSaving(false);
+    }, 600);
   };
 
   return (
     <div id="config-page-container" className="space-y-6">
-      <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+      {/* Header Banner */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-200 pb-4 gap-4">
         <div>
           <h1 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
             <Settings className="w-4 h-4 text-blue-600" />
-            Configuração da Integração Google Drive
+            Configurações da Integração Google Drive
           </h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Módulo Operacional Ativo: <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-blue-600">/boss-giffoni-clientes/configuracoes/integracoes-google-drive</code>
+            Gerencie credenciais corporativas, chaves de acesso e a pasta destino "clientes office".
           </p>
         </div>
-        <div className="text-[10px] text-slate-400 font-mono italic">
-          Modular Build v1.0.4
+        <div className="text-[10px] text-slate-400 font-mono bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
+          Infraestrutura Giffoni Connect • v1.2.0
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Card 1: Status da Integração */}
-        <div id="card-integration-status" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex flex-col justify-between min-h-[220px]">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-slate-700 text-xs uppercase tracking-wider">Status da Integração</h2>
-              {isAuthenticated ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  ATIVO
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-                  DESCONECTADO
-                </span>
-              )}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* Left main form block */}
+        <div className="col-span-1 lg:col-span-7 space-y-6">
+          
+          {/* Card: Auth credentials and core API details */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+              <Key className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Credenciais & Segurança</h2>
             </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed mb-4">
-              O Portal BOSS automatiza a criação de diretórios de forma isolada na nuvem. A autenticação garante conformidade e segurança em lote.
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">E-mail conectado ao Google Drive</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="email"
+                    placeholder="Ex: direito.rgr@gmail.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full text-xs pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-semibold text-slate-700 transition-all font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Status da conexão</label>
+                <div className="flex items-center h-8 bg-slate-100 border border-slate-250 px-3 rounded-lg text-xs font-bold font-mono">
+                  {isAuthenticated ? (
+                    <span className="flex items-center gap-1.5 text-emerald-700">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      CONECTADO
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-slate-600">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                      DESCONECTADO
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Chave de API / Credenciais</label>
+                <input
+                  type="password"
+                  placeholder="Cole sua API Key do Google Cloud Console"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Client ID</label>
+                  <input
+                    type="text"
+                    placeholder="E.g. XXXX-XXXX.apps.googleusercontent.com"
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Client Secret</label>
+                  <input
+                    type="password"
+                    placeholder="GOCSPX-XXXXXXXXXXXXXXX"
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Redirect URI</label>
+                <input
+                  type="text"
+                  placeholder="https://giffoniconnect.com/oauth-callback"
+                  value={redirectUri}
+                  onChange={(e) => setRedirectUri(e.target.value)}
+                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Escopos autorizados</label>
+                <div className="relative">
+                  <Shield className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="E.g. https://www.googleapis.com/auth/drive"
+                    value={scopesVal}
+                    onChange={(e) => setScopesVal(e.target.value)}
+                    className="w-full text-xs pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Google Authentication Actions */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-bold text-slate-700">Autenticação Google</h4>
+                <p className="text-[10px] text-slate-450">Authorize writing folders with standard consent screen.</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                {!isAuthenticated ? (
+                  <button
+                    onClick={onLogin}
+                    className="flex items-center gap-1.5 bg-slate-900 border border-slate-950 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm"
+                  >
+                    <ToggleLeft className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Conectar Google Drive</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={onTestConnection}
+                      disabled={isTesting}
+                      className="flex items-center gap-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-xs px-3 py-2 rounded-lg transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin text-slate-500' : 'text-slate-500'}`} />
+                      <span>Testar conexão</span>
+                    </button>
+                    <button
+                      onClick={onLogout}
+                      className="p-2 border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition-colors cursor-pointer"
+                      title="Desvincular conta Google"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right side block is Destination Folder Configuration and Logs */}
+        <div className="col-span-1 lg:col-span-5 space-y-6">
+
+          {/* Card: Configuração da pasta destino */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+              <Briefcase className="w-4 h-4 text-blue-600" />
+              <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Configuração da Pasta Destino</h2>
+            </div>
+
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Define o repositório central que o Portal BOSS consultará para agrupar as novas pastas criadas por cliente.
             </p>
 
-            {isAuthenticated && userEmail && (
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Conta Google Ativa</div>
-                  <div className="text-xs text-slate-700 font-mono mt-0.5 font-medium">{userEmail}</div>
-                </div>
-                <button
-                  onClick={onLogout}
-                  className="p-1.5 hover:bg-slate-150 rounded-lg text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
-                  title="Desconectar conta Google"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Nome da pasta destino</label>
+                <input
+                  type="text"
+                  placeholder="clientes office"
+                  value={destName}
+                  onChange={(e) => setDestName(e.target.value)}
+                  className="w-full text-xs font-semibold px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
+                />
               </div>
-            )}
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">UID da pasta destino [Editável]</label>
+                <input
+                  type="text"
+                  placeholder=" UID da Pasta Pai no Drive"
+                  value={destId}
+                  onChange={(e) => setDestId(e.target.value)}
+                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Link da pasta destino [Editável]</label>
+                <input
+                  type="url"
+                  placeholder="https://drive.google.com/drive/folders/XXXXXX"
+                  value={destUrl}
+                  onChange={(e) => setDestUrl(e.target.value)}
+                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                />
+              </div>
+            </div>
           </div>
 
+          {/* Centered Button to trigger general Save settings */}
           <div>
-            {!isAuthenticated ? (
-              <div className="flex justify-center py-1">
-                <GSIButton onClick={onLogin} id="gsi-drive-login-button" text="Conectar Google Drive" />
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <button
-                  onClick={onTestConnection}
-                  disabled={isTesting}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer disabled:opacity-50 shadow-sm shadow-blue-500/10"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isTesting ? 'animate-spin' : ''}`} />
-                  <span>Testar Conexão</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Card 2: Pasta Raiz Configurada */}
-        <div id="card-root-folder" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-700 text-xs uppercase tracking-wider flex items-center gap-1.5">
-              <Folder className="w-4 h-4 text-slate-500" />
-              Pasta Raiz de Trabalho
-            </h2>
-            {settings.rootFolderId ? (
-              <span className="text-[9px] font-bold uppercase tracking-wider text-blue-700 bg-blue-105 bg-blue-50 px-2 py-0.5 rounded border border-blue-150">
-                Pai Customizado
-              </span>
-            ) : (
-              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-550 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                Raiz Geral
-              </span>
-            )}
-          </div>
-
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Diretório pai principal onde serão estruturadas as pastas dos clientes do fluxo. Caso em branco, os diretórios nascerão na raiz geral.
-          </p>
-
-          <div className="space-y-3 pt-1">
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">ID da Pasta Raiz (Drive)</label>
-              <input
-                type="text"
-                placeholder="Ex ID: 1aBcDeFg_hI_jKlMnOpQrStUvWxYz"
-                value={manualFolderId}
-                onChange={(e) => setManualFolderId(e.target.value)}
-                className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-all"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Nome Amigável da Pasta</label>
-              <input
-                type="text"
-                placeholder="Ex: Portal BOSS - Clientes"
-                value={manualFolderName}
-                onChange={(e) => setManualFolderName(e.target.value)}
-                className="w-full text-xs px-3 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-all"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 pt-1.5">
-              <button
-                onClick={handleSaveManualRoot}
-                className="flex-1 px-4 py-2 bg-slate-900 border border-slate-950 text-white hover:bg-slate-800 font-bold text-xs rounded-lg transition-colors cursor-pointer"
-              >
-                Salvar Diretório Raiz
-              </button>
-              
-              {isAuthenticated && (
-                <button
-                  onClick={handleCreateDefaultRoot}
-                  disabled={isCreatingRootFolder}
-                  className="px-3 py-2 border border-slate-200 hover:border-slate-350 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition-colors text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-55"
-                  title="Criar diretório 'Portal BOSS Clientes' de maneira automatizada"
-                >
-                  {isCreatingRootFolder ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-slate-500" />
-                  ) : (
-                    <FolderOpen className="w-3.5 h-3.5 text-slate-500" />
-                  )}
-                  <span className="font-semibold text-xs">Criar Raiz Automática</span>
-                </button>
+            <button
+              onClick={handleSaveConfigs}
+              disabled={saving}
+              className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer select-none"
+            >
+              {saving ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Salvando Configurações...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Salvar Configurações</span>
+                </>
               )}
-            </div>
+            </button>
           </div>
+
         </div>
       </div>
 
-      {/* Card 3: Terminal de Logs da Integração */}
+      {/* Terminal de Logs */}
       <div id="card-integration-logs" className="bg-slate-900 rounded-xl p-5 shadow-md space-y-3">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
           <div className="flex items-center gap-2">
             <Terminal className="w-4 h-4 text-slate-400" />
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-350">Logs de Sistema</h2>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-350 font-mono">Painel de Logs em Linguagem Simples</h2>
           </div>
           <button
             onClick={onClearLogs}
@@ -245,14 +340,14 @@ export function ConfigurationPage({
             className="text-[10px] text-slate-500 hover:text-rose-400 font-mono transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-30"
           >
             <Trash2 className="w-3 h-3" />
-            Limpar Console
+            Limpar Logs
           </button>
         </div>
 
-        <div className="font-mono text-[10px] max-h-[220px] overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+        <div className="font-mono text-[10px] max-h-[150px] overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
           {logs.length === 0 ? (
-            <div className="text-slate-500 italic text-center py-8 select-none">
-              [IDLE] Aguardando eventos de infraestrutura ou fluxos de trabalho...
+            <div className="text-slate-500 italic text-center py-4 select-none">
+              Nenhuma entrada no console operacional.
             </div>
           ) : (
             logs.map((log) => (

@@ -5,16 +5,29 @@ export interface Client {
   razaoSocial?: string; // for PJ
   nomeFantasia?: string; // for PJ
   documento: string; // CPF or CNPJ
-  googleDriveClientFolderUrl?: string;
+  
+  // Client Folder fields to persist & return to Portal BOSS
+  googleDriveClientFolderName?: string;
   googleDriveClientFolderId?: string;
+  googleDriveClientFolderUrl?: string;
   googleDriveCreatedAt?: string;
   googleDriveStatus?: 'created' | 'linked' | 'pending' | 'error';
 }
 
 export interface IntegrationSettings {
-  rootFolderId: string;
-  rootFolderName: string;
-  status: 'connected' | 'disconnected' | 'error';
+  // Authentication states
+  googleDriveConnectedEmail: string;
+  googleDriveConnectionStatus: 'connected' | 'disconnected' | 'error';
+  googleDriveApiKey: string;
+  googleDriveClientId: string;
+  googleDriveClientSecret: string;
+  googleDriveRedirectUri: string;
+  googleDriveScopes: string;
+
+  // Target Destination Folder "clientes office"
+  googleDriveDestinationFolderName: string;
+  googleDriveDestinationFolderId: string;
+  googleDriveDestinationFolderUrl: string;
 }
 
 export interface IntegrationLog {
@@ -23,3 +36,4 @@ export interface IntegrationLog {
   type: 'info' | 'success' | 'error';
   message: string;
 }
+
