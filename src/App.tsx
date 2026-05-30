@@ -89,7 +89,13 @@ export default function App() {
     const storedClients = localStorage.getItem('boss_drive_clients');
     if (storedClients) {
       try {
-        setClients(JSON.parse(storedClients));
+        const parsed = JSON.parse(storedClients);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter(c => c && typeof c === 'object' && c.id);
+          setClients(filtered.length > 0 ? filtered : INITIAL_CLIENTS);
+        } else {
+          setClients(INITIAL_CLIENTS);
+        }
       } catch (e) {
         setClients(INITIAL_CLIENTS);
       }
@@ -329,7 +335,7 @@ export default function App() {
             }`}
           >
             <FileText className={`w-4 h-4 ${activeTab === 'flow' ? 'text-blue-500' : 'text-slate-500'}`} />
-            <span>1.6 Estruturação</span>
+            <span>Automação de Criar Pasta a partir do nome do cliente no cadastro</span>
           </button>
 
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-6 mb-2 px-2 select-none">

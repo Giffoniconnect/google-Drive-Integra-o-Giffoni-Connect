@@ -41,7 +41,8 @@ export function StructuredStep({
   const [newFantasia, setNewFantasia] = useState('');
   const [newDoc, setNewDoc] = useState('');
 
-  const activeClient = clients.find(c => c.id === selectedClientId) || clients[0];
+  const validClients = (clients || []).filter(c => c && typeof c === 'object' && c.id);
+  const activeClient = validClients.find(c => c.id === selectedClientId) || validClients[0];
 
   const handleCreateClientSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,10 +73,11 @@ export function StructuredStep({
   const getClientDisplayName = (client: Client) => {
     if (!client) return '';
     if (client.type === 'PF') {
-      return client.nomeCompleto;
-    } else {
+      return client.nomeCompleto || 'Cliente Sem Nome';
+    } else if (client.type === 'PJ') {
       return client.nomeFantasia || client.razaoSocial || 'Empresa Sem Nome';
     }
+    return client.nomeCompleto || client.nomeFantasia || client.razaoSocial || 'Nome Indisponível';
   };
 
   return (
@@ -99,7 +101,7 @@ export function StructuredStep({
               onChange={(e) => onSelectClient(e.target.value)}
               className="w-full md:w-64 text-xs px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-semibold text-slate-700 transition-all cursor-pointer"
             >
-              {clients.map(c => (
+              {validClients.map(c => (
                 <option key={c.id} value={c.id}>
                   {c.type === 'PF' ? `[PF] ${c.nomeCompleto}` : `[PJ] ${c.nomeFantasia || c.razaoSocial}`}
                 </option>
@@ -337,13 +339,13 @@ export function StructuredStep({
                   <div className="bg-white border border-slate-200 p-3 rounded-lg">
                     <div className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Tipo de Pessoa</div>
                     <div className="text-xs font-bold text-slate-700 mt-0.5">
-                      {activeClient.type === 'PF' ? 'Pessoa Física (PF)' : 'Pessoa Jurídica (PJ)'}
+                      {activeClient?.type === 'PF' ? 'Pessoa Física (PF)' : 'Pessoa Jurídica (PJ)'}
                     </div>
                   </div>
                 </div>
 
                 {/* State handling with professional touch */}
-                {activeClient.googleDriveStatus ? (
+                {activeClient?.googleDriveStatus ? (
                   <div className="bg-white border border-slate-100 rounded-lg p-4 text-center space-y-3 shadow-inner">
                     <div className="flex flex-col items-center justify-center">
                       <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-200">
@@ -356,7 +358,7 @@ export function StructuredStep({
                     </div>
 
                     <div className="flex flex-col sm:flex-row justify-center items-center gap-2 text-[10px] text-slate-400 font-mono bg-slate-50 p-2 rounded border border-slate-150">
-                      <span className="block truncate max-w-[190px]">ID: {activeClient.googleDriveClientFolderId}</span>
+                      <span className="block truncate max-w-[190px]">ID: {activeClient?.googleDriveClientFolderId}</span>
                       <span className="hidden sm:inline text-slate-300">•</span>
                       <span>Status: Conectado</span>
                     </div>
@@ -422,18 +424,18 @@ export function StructuredStep({
                 )}
 
                 {/* Conditional Success / Trace Representation footer block */}
-                <div className={`flex items-center justify-between pt-1 select-none transition-opacity duration-300 ${activeClient.googleDriveStatus ? 'opacity-100' : 'opacity-40'}`}>
+                <div className={`flex items-center justify-between pt-1 select-none transition-opacity duration-300 ${activeClient?.googleDriveStatus ? 'opacity-100' : 'opacity-40'}`}>
                   <div className="flex items-center gap-1.5">
-                    <div className={`w-1.5 h-1.5 rounded-full ${activeClient.googleDriveStatus ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
+                    <div className={`w-1.5 h-1.5 rounded-full ${activeClient?.googleDriveStatus ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      {activeClient.googleDriveStatus 
-                        ? `ID: ${activeClient.googleDriveClientFolderId?.slice(0, 16)}...`
+                      {activeClient?.googleDriveStatus 
+                        ? `ID: ${activeClient?.googleDriveClientFolderId?.slice(0, 16)}...`
                         : 'ID: Pendente de geração'}
                     </span>
                   </div>
-                  {activeClient.googleDriveStatus && (
+                  {activeClient?.googleDriveStatus && (
                     <a 
-                      href={activeClient.googleDriveClientFolderUrl}
+                      href={activeClient?.googleDriveClientFolderUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[10px] text-slate-500 font-bold underline cursor-pointer hover:text-slate-800"
