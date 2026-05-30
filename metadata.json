@@ -1,0 +1,6 @@
+{
+  "name": "Portal BOSS Clientes - Google Drive",
+  "description": "Integração simples e independente com o Google Drive para o Portal BOSS Clientes, focando na criação automática de pastas para clientes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
