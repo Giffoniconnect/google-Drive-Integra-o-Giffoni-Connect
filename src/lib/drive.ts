@@ -86,3 +86,24 @@ export async function testConnection(accessToken: string): Promise<boolean> {
   });
   return response.ok;
 }
+
+export async function verifyFolderById(
+  accessToken: string,
+  folderId: string
+): Promise<boolean> {
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,mimeType,trashed`;
+  
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const data = await response.json();
+  return !!(data && data.mimeType === 'application/vnd.google-apps.folder' && !data.trashed);
+}
+

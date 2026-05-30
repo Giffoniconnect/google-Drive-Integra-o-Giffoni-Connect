@@ -31,6 +31,7 @@ interface ConfigurationPageProps {
   onTestConnection: () => Promise<void>;
   isTesting: boolean;
   onAddLog: (type: 'info' | 'success' | 'error', message: string) => void;
+  onTestFolder: (folderId: string) => Promise<void>;
 }
 
 export function ConfigurationPage({
@@ -45,7 +46,8 @@ export function ConfigurationPage({
   onLogout,
   onTestConnection,
   isTesting,
-  onAddLog
+  onAddLog,
+  onTestFolder
 }: ConfigurationPageProps) {
   // Configured states
   const [email, setEmail] = useState(settings.googleDriveConnectedEmail || 'direito.rgr@gmail.com');
@@ -62,6 +64,7 @@ export function ConfigurationPage({
   const [destUrl, setDestUrl] = useState(settings.googleDriveDestinationFolderUrl || '');
 
   const [saving, setSaving] = useState(false);
+  const [isTestingFolder, setIsTestingFolder] = useState(false);
 
   const handleSaveConfigs = () => {
     setSaving(true);
@@ -79,12 +82,38 @@ export function ConfigurationPage({
       googleDriveDestinationFolderUrl: destUrl,
     });
 
-    onAddLog('success', 'Configurações do Google Drive atualizadas e salvas no Portal BOSS localmente com sucesso.');
+    onAddLog('success', 'Credenciais Google Drive salvas com sucesso.');
+    onAddLog('success', 'Pasta destino salva com sucesso.');
     
     setTimeout(() => {
       setSaving(false);
     }, 600);
   };
+
+  const handleConnectClick = () => {
+    onLogin();
+  };
+
+  const handleTestFolderClick = async () => {
+    if (!destId || destId.trim() === '') {
+      onAddLog('error', 'Erro de Validação: O UID da pasta destino é obrigatório para realizar o teste.');
+      return;
+    }
+
+    if (!destUrl || destUrl.trim() === '') {
+      onAddLog('info', 'Aviso: O link da pasta de destino está vazio. O teste prosseguirá usando apenas o UID.');
+    }
+
+    setIsTestingFolder(true);
+    try {
+      await onTestFolder(destId);
+    } catch (e: any) {
+      onAddLog('error', `Falha ao testar pasta destino: ${e.message || e}`);
+    } finally {
+      setIsTestingFolder(false);
+    }
+  };
+
 
   return (
     <div id="config-page-container" className="space-y-6">
@@ -189,11 +218,14 @@ export function ConfigurationPage({
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">Redirect URI</label>
                 <input
                   type="text"
-                  placeholder="https://giffoniconnect.com/oauth-callback"
-                  value={redirectUri}
-                  onChange={(e) => setRedirectUri(e.target.value)}
-                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  placeholder="https://planar-granite-495814-r8.firebaseapp.com/__/auth/handler"
+                  value={redirectUri || 'https://planar-granite-495814-r8.firebaseapp.com/__/auth/handler'}
+                  readOnly
+                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-100 text-slate-500 cursor-not-allowed focus:outline-none transition-all"
                 />
+                <p className="text-[11px] text-blue-600 mt-1.5 font-semibold">
+                  Autenticação gerenciada pelo Firebase Auth. Não altere este campo.
+                </p>
               </div>
 
               <div>
@@ -220,7 +252,7 @@ export function ConfigurationPage({
               <div className="flex gap-2 shrink-0">
                 {!isAuthenticated ? (
                   <button
-                    onClick={onLogin}
+                    onClick={handleConnectClick}
                     className="flex items-center gap-1.5 bg-slate-900 border border-slate-950 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all active:scale-95 cursor-pointer shadow-sm"
                   >
                     <ToggleLeft className="w-3.5 h-3.5 text-slate-400" />
@@ -294,8 +326,21 @@ export function ConfigurationPage({
                   placeholder="https://drive.google.com/drive/folders/XXXXXX"
                   value={destUrl}
                   onChange={(e) => setDestUrl(e.target.value)}
-                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
                 />
+              </div>
+
+              {/* Testar pasta destino button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleTestFolderClick}
+                  disabled={isTestingFolder}
+                  className="w-full flex items-center justify-center gap-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs py-2 rounded-lg transition-all cursor-pointer disabled:opacity-50 shadow-xs"
+                >
+                  <FolderOpen className={`w-3.5 h-3.5 ${isTestingFolder ? 'animate-pulse text-blue-500' : 'text-slate-500'}`} />
+                  <span>{isTestingFolder ? 'Verificando pasta...' : 'Testar pasta destino'}</span>
+                </button>
               </div>
             </div>
           </div>

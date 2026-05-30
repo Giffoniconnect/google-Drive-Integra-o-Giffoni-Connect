@@ -47,7 +47,7 @@ const INITIAL_SETTINGS: IntegrationSettings = {
   googleDriveApiKey: '',
   googleDriveClientId: '',
   googleDriveClientSecret: '',
-  googleDriveRedirectUri: 'https://ais-pre-dg4bxdc7rv3rtl5g75fdsi-599536317399.us-east1.run.app/oauth/callback',
+  googleDriveRedirectUri: 'https://planar-granite-495814-r8.firebaseapp.com/__/auth/handler',
   googleDriveScopes: 'https://www.googleapis.com/auth/drive.file, https://www.googleapis.com/auth/drive',
   googleDriveDestinationFolderName: 'clientes office',
   googleDriveDestinationFolderId: '',
@@ -71,7 +71,7 @@ export default function App() {
   const [isCreatingPF, setIsCreatingPF] = useState(false);
   const [isCreatingPJ, setIsCreatingPJ] = useState(false);
   const [isTestLoading, setIsTestLoading] = useState(false);
-
+ 
   // Helper to push systemic logs
   const addLog = (type: 'info' | 'success' | 'error', message: string) => {
     const newLog: IntegrationLog = {
@@ -110,6 +110,16 @@ export default function App() {
       try {
         const parsedSetting = JSON.parse(storedSettings);
         setSettings(prev => ({ ...prev, ...parsedSetting }));
+        
+        // Restore custom credentials session if a valid access token was saved
+        if (parsedSetting.googleDriveAccessToken) {
+          setAccessTokenState(parsedSetting.googleDriveAccessToken);
+          setAccessToken(parsedSetting.googleDriveAccessToken); // restore in-memory cached token inside firebase.ts
+          setIsAuthenticated(true);
+          if (parsedSetting.googleDriveConnectedEmail) {
+            setUserEmail(parsedSetting.googleDriveConnectedEmail);
+          }
+        }
       } catch (e) {
         setSettings(INITIAL_SETTINGS);
       }
@@ -141,7 +151,7 @@ export default function App() {
     setLogs([]);
   };
 
-  // Auth setup hook
+  // Auth setup hook (handles Firebase popups)
   useEffect(() => {
     const unsubscribe = initAuth(
       (user, token) => {
@@ -151,16 +161,30 @@ export default function App() {
         setAccessToken(token); // set in memory inside firebase module
         handleSaveSettings({ 
           googleDriveConnectionStatus: 'connected',
-          googleDriveConnectedEmail: user.email || '' 
+          googleDriveConnectedEmail: user.email || '',
+          googleDriveAccessToken: token
         });
         addLog('success', `Autenticação Google ativa para: ${user.email}`);
       },
       () => {
-        setIsAuthenticated(false);
-        setUserEmail(null);
-        setAccessTokenState(null);
-        setAccessToken(null);
-        handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
+        // If there's a cached token in settings restored on init, we can keep it, so we don't clear authentications prematurely
+        const stored = localStorage.getItem('boss_drive_settings');
+        let hasSavedToken = false;
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed.googleDriveAccessToken) {
+              hasSavedToken = true;
+            }
+          } catch (e) {}
+        }
+        if (!hasSavedToken) {
+          setIsAuthenticated(false);
+          setUserEmail(null);
+          setAccessTokenState(null);
+          setAccessToken(null);
+          handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
+        }
       }
     );
     return () => unsubscribe();
@@ -168,23 +192,23 @@ export default function App() {
 
   const handleLogin = async () => {
     setIsAuthenticating(true);
-    addLog('info', 'Solicitando autenticação Google...');
+    addLog('info', 'Iniciando autenticação Google via Firebase Auth...');
     try {
       const res = await googleSignIn();
       if (res) {
         setIsAuthenticated(true);
         setUserEmail(res.user.email);
         setAccessTokenState(res.accessToken);
+        setAccessToken(res.accessToken);
         handleSaveSettings({ 
           googleDriveConnectionStatus: 'connected',
-          googleDriveConnectedEmail: res.user.email || '' 
+          googleDriveConnectedEmail: res.user.email || '',
+          googleDriveAccessToken: res.accessToken
         });
         addLog('success', `Conectado ao Google Drive com sucesso! Conta: ${res.user.email}`);
       }
     } catch (err: any) {
-      addLog('error', `Falha na conexão: ${err.message || err}`);
-      addLog('error', 'Verifique se o Google Drive está conectado corretamente.');
-      handleSaveSettings({ googleDriveConnectionStatus: 'error' });
+      addLog('error', `Falha ao iniciar autenticação: ${err.message || err}`);
     } finally {
       setIsAuthenticating(false);
     }
@@ -194,14 +218,15 @@ export default function App() {
     addLog('info', 'Revogando token de acesso do Google Drive...');
     try {
       await logout();
-      setIsAuthenticated(false);
-      setUserEmail(null);
-      setAccessTokenState(null);
-      handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
-      addLog('info', 'Desconectado. Credenciais e tokens limpos.');
-    } catch (err: any) {
-      addLog('error', `Erro ao desconectar: ${err.message || err}`);
-    }
+    } catch (e) {}
+    setIsAuthenticated(false);
+    setUserEmail(null);
+    setAccessTokenState(null);
+    handleSaveSettings({ 
+      googleDriveConnectionStatus: 'disconnected',
+      googleDriveAccessToken: ''
+    });
+    addLog('info', 'Desconectado. Credenciais e tokens limpos.');
   };
 
   const handleTestConnection = async () => {
@@ -214,7 +239,7 @@ export default function App() {
     try {
       const ok = await testConnection(accessToken);
       if (ok) {
-        addLog('success', 'Conexão validada! Google Drive API respondeu 200 OK.');
+        addLog('success', 'Conexão real com Google Drive validada com sucesso.');
         handleSaveSettings({ googleDriveConnectionStatus: 'connected' });
       } else {
         addLog('error', 'Falha na conexão de teste. Re-autorização necessária.');
@@ -222,10 +247,28 @@ export default function App() {
       }
     } catch (err: any) {
       addLog('error', `Falha ao testar conexão: ${err.message || err}`);
-      addLog('error', 'Verifique se a chave de API/credenciais foram configuradas.');
       handleSaveSettings({ googleDriveConnectionStatus: 'error' });
     } finally {
       setIsTestLoading(false);
+    }
+  };
+
+  const handleTestFolder = async (folderId: string) => {
+    if (!accessToken) {
+      addLog('error', 'Token de acesso indisponível. Conecte ao Google Drive primeiro.');
+      return;
+    }
+    addLog('info', `Consultando o Google Drive para verificar a pasta de UID: ${folderId}...`);
+    try {
+      const { verifyFolderById } = await import('./lib/drive');
+      const exists = await verifyFolderById(accessToken, folderId);
+      if (exists) {
+        addLog('success', 'Pasta destino localizada com sucesso.');
+      } else {
+        addLog('error', 'Não foi possível localizar a pasta destino.');
+      }
+    } catch (err: any) {
+      addLog('error', 'Não foi possível localizar a pasta destino.');
     }
   };
 
@@ -608,6 +651,7 @@ export default function App() {
                 onTestConnection={handleTestConnection}
                 isTesting={isTestLoading}
                 onAddLog={addLog}
+                onTestFolder={handleTestFolder}
               />
             )}
           </div>

@@ -28,6 +28,7 @@ export interface IntegrationSettings {
   googleDriveDestinationFolderName: string;
   googleDriveDestinationFolderId: string;
   googleDriveDestinationFolderUrl: string;
+  googleDriveAccessToken?: string;
 }
 
 export interface IntegrationLog {
