@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Terminal,
   Trash2,
+  Copy,
   HelpCircle,
   FolderLock
 } from 'lucide-react';
@@ -30,6 +31,7 @@ interface StructuredStepProps {
   settings: IntegrationSettings;
   logs: IntegrationLog[];
   onClearLogs: () => void;
+  onAddLog: (type: 'info' | 'success' | 'error', message: string) => void;
 }
 
 export function StructuredStep({
@@ -45,7 +47,8 @@ export function StructuredStep({
   onAddClient,
   settings,
   logs,
-  onClearLogs
+  onClearLogs,
+  onAddLog
 }: StructuredStepProps) {
   const [showAddClient, setShowAddClient] = useState(false);
   const [newType, setNewType] = useState<'PF' | 'PJ'>('PF');
@@ -90,6 +93,21 @@ export function StructuredStep({
     } else {
       return client.nomeFantasia || client.razaoSocial || 'Sem Nome Fantasia PJ';
     }
+  };
+
+  const handleCopyLogs = () => {
+    if (logs.length === 0) {
+      onAddLog('error', 'Não há logs para copiar.');
+      return;
+    }
+    const text = logs.map(log => `[${log.timestamp}] [${log.type.toUpperCase()}] ${log.message}`).join('\n');
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        onAddLog('success', 'Logs copiados para a área de transferência com sucesso.');
+      })
+      .catch((err) => {
+        onAddLog('error', `Falha ao copiar logs: ${err.message || err}`);
+      });
   };
 
   return (
@@ -475,14 +493,23 @@ export function StructuredStep({
             <Terminal className="w-4 h-4 text-slate-400" />
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-350 font-mono">Logs de Operação</h2>
           </div>
-          <button
-            onClick={onClearLogs}
-            disabled={logs.length === 0}
-            className="text-[10px] text-slate-500 hover:text-rose-400 font-mono transition-colors flex items-center gap-1 cursor-pointer"
-          >
-            <Trash2 className="w-3 h-3" />
-            Limpar Logs
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleCopyLogs}
+              className="text-[10px] text-slate-400 hover:text-blue-400 font-mono transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Copy className="w-3 h-3 text-slate-400" />
+              Copiar Logs
+            </button>
+            <button
+              onClick={onClearLogs}
+              disabled={logs.length === 0}
+              className="text-[10px] text-slate-500 hover:text-rose-400 font-mono transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Trash2 className="w-3 h-3" />
+              Limpar Logs
+            </button>
+          </div>
         </div>
 
         <div className="font-mono text-[10px] max-h-[140px] overflow-y-auto space-y-1">

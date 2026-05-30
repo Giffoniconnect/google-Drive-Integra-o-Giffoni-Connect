@@ -36,5 +36,6 @@ export interface IntegrationLog {
   timestamp: string;
   type: 'info' | 'success' | 'error';
   message: string;
+  category?: 'connection' | 'localizer';
 }
 

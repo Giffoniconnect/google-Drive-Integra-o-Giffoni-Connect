@@ -73,12 +73,13 @@ export default function App() {
   const [isTestLoading, setIsTestLoading] = useState(false);
  
   // Helper to push systemic logs
-  const addLog = (type: 'info' | 'success' | 'error', message: string) => {
+  const addLog = (type: 'info' | 'success' | 'error', message: string, category?: 'connection' | 'localizer') => {
     const newLog: IntegrationLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       timestamp: new Date().toLocaleTimeString('pt-BR'),
       type,
       message,
+      category,
     };
     setLogs(prev => [newLog, ...prev]);
   };
@@ -147,8 +148,14 @@ export default function App() {
     });
   };
 
-  const handleClearLogs = () => {
-    setLogs([]);
+  const handleClearLogs = (category?: 'connection' | 'localizer' | 'all') => {
+    if (!category || category === 'all') {
+      setLogs([]);
+    } else if (category === 'localizer') {
+      setLogs(prev => prev.filter(log => log.category !== 'localizer'));
+    } else if (category === 'connection') {
+      setLogs(prev => prev.filter(log => log.category === 'localizer'));
+    }
   };
 
   // Auth setup hook (handles Firebase popups)
@@ -192,10 +199,70 @@ export default function App() {
 
   const handleLogin = async () => {
     setIsAuthenticating(true);
-    addLog('info', 'Iniciando autenticação Google via Firebase Auth...');
+    addLog('info', 'Iniciando autorização Google Drive...', 'connection');
+    addLog('info', 'Solicitando permissão para ler/listar pastas.', 'connection');
+    addLog('info', 'Solicitando permissão para criar pastas.', 'connection');
     try {
       const res = await googleSignIn();
-      if (res) {
+      if (res && res.accessToken) {
+        let scopes: string[] = [];
+        let tokenInfoVerified = false;
+        try {
+          const tokenInfoRes = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${res.accessToken}`);
+          if (tokenInfoRes.ok) {
+            const info = await tokenInfoRes.json();
+            if (info.scope) {
+              scopes = info.scope.split(' ');
+              tokenInfoVerified = true;
+            }
+          }
+        } catch (e: any) {
+          console.warn('Erro ao obter tokeninfo:', e);
+        }
+
+        if (tokenInfoVerified) {
+          const hasMetadata = scopes.some(s => 
+            s === 'https://www.googleapis.com/auth/drive' || 
+            s === 'https://www.googleapis.com/auth/drive.metadata.readonly' || 
+            s === 'https://www.googleapis.com/auth/drive.metadata'
+          );
+
+          const hasFile = scopes.some(s => 
+            s === 'https://www.googleapis.com/auth/drive' || 
+            s === 'https://www.googleapis.com/auth/drive.file'
+          );
+
+          if (!hasMetadata && !hasFile) {
+            addLog('error', 'Login realizado, mas permissões do Drive não foram concedidas.', 'connection');
+            setIsAuthenticated(false);
+            setUserEmail(null);
+            setAccessTokenState(null);
+            setAccessToken(null);
+            handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
+            return;
+          }
+
+          if (!hasMetadata) {
+            addLog('error', 'Token recebido sem escopos suficientes para listar pastas.', 'connection');
+            setIsAuthenticated(false);
+            setUserEmail(null);
+            setAccessTokenState(null);
+            setAccessToken(null);
+            handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
+            return;
+          }
+
+          if (!hasFile) {
+            addLog('error', 'Token recebido sem escopos suficientes para criar pastas.', 'connection');
+            setIsAuthenticated(false);
+            setUserEmail(null);
+            setAccessTokenState(null);
+            setAccessToken(null);
+            handleSaveSettings({ googleDriveConnectionStatus: 'disconnected' });
+            return;
+          }
+        }
+
         setIsAuthenticated(true);
         setUserEmail(res.user.email);
         setAccessTokenState(res.accessToken);
@@ -205,10 +272,27 @@ export default function App() {
           googleDriveConnectedEmail: res.user.email || '',
           googleDriveAccessToken: res.accessToken
         });
-        addLog('success', `Conectado ao Google Drive com sucesso! Conta: ${res.user.email}`);
+        addLog('success', 'Permissões Google Drive autorizadas com sucesso.', 'connection');
+        addLog('success', 'Token de acesso recebido com escopos válidos.', 'connection');
+        addLog('success', 'Google Drive conectado e autorizado com sucesso.', 'connection');
+      } else {
+        addLog('error', 'Não foi possível conectar ao Google Drive.', 'connection');
+        addLog('error', 'Token de acesso não recebido.', 'connection');
+        addLog('error', 'Verifique se o OAuth Client está corretamente configurado.', 'connection');
       }
     } catch (err: any) {
-      addLog('error', `Falha ao iniciar autenticação: ${err.message || err}`);
+      addLog('error', 'Não foi possível conectar ao Google Drive.', 'connection');
+      
+      const errorCode = err?.code || '';
+      
+      if (errorCode === 'auth/popup-blocked') {
+        addLog('error', 'Popup bloqueado pelo navegador.', 'connection');
+      } else if (errorCode === 'auth/popup-closed-by-user' || errorCode === 'auth/cancelled-popup-request') {
+        addLog('error', 'Autenticação cancelada pelo usuário.', 'connection');
+      } else {
+        addLog('error', 'Token de acesso não recebido.', 'connection');
+        addLog('error', 'Verifique se o OAuth Client está corretamente configurado.', 'connection');
+      }
     } finally {
       setIsAuthenticating(false);
     }
@@ -230,23 +314,26 @@ export default function App() {
   };
 
   const handleTestConnection = async () => {
+    addLog('info', 'Iniciando teste de conexão Google Drive...', 'connection');
+    addLog('info', 'Verificando token de acesso...', 'connection');
     if (!accessToken) {
-      addLog('error', 'Token de acesso indisponível. Conecte ao Google Drive primeiro.');
+      addLog('error', 'Token de acesso indisponível. Conecte ao Google Drive primeiro.', 'connection');
       return;
     }
+    addLog('success', 'Token de acesso encontrado.', 'connection');
     setIsTestLoading(true);
-    addLog('info', 'Testando canais de comunicação com a Drive REST API...');
+    addLog('info', 'Testando comunicação com Drive API...', 'connection');
     try {
       const ok = await testConnection(accessToken);
       if (ok) {
-        addLog('success', 'Conexão real com Google Drive validada com sucesso.');
+        addLog('success', 'Conexão real com Google Drive validada com sucesso.', 'connection');
         handleSaveSettings({ googleDriveConnectionStatus: 'connected' });
       } else {
-        addLog('error', 'Falha na conexão de teste. Re-autorização necessária.');
+        addLog('error', 'Falha na conexão de teste. Re-autorização necessária.', 'connection');
         handleSaveSettings({ googleDriveConnectionStatus: 'error' });
       }
     } catch (err: any) {
-      addLog('error', `Falha ao testar conexão: ${err.message || err}`);
+      addLog('error', `Falha ao testar conexão: ${err.message || err}`, 'connection');
       handleSaveSettings({ googleDriveConnectionStatus: 'error' });
     } finally {
       setIsTestLoading(false);
@@ -636,6 +723,7 @@ export default function App() {
                 settings={settings}
                 logs={logs}
                 onClearLogs={handleClearLogs}
+                onAddLog={addLog}
               />
             ) : (
               <ConfigurationPage

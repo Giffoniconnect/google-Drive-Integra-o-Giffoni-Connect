@@ -14,7 +14,9 @@ export const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
 // Required scopes for Drive file integration, email and profile
+provider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
 provider.addScope('https://www.googleapis.com/auth/drive.file');
+provider.addScope('https://www.googleapis.com/auth/drive');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
