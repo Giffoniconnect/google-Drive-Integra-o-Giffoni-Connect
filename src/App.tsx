@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react';
 import { 
   Settings, 
   FileText, 
-  FolderLock
+  FolderLock,
+  Compass
 } from 'lucide-react';
 import { IntegrationSettings, IntegrationLog } from './types';
 import { initAuth, googleSignIn, logout, setAccessToken } from './lib/firebase';
 import { checkFolderExists, createFolder, testConnection } from './lib/drive';
 import { ConfigurationPage } from './components/ConfigurationPage';
 import { StructuredStep } from './components/StructuredStep';
+import { DeepAuditPage } from './components/DeepAuditPage';
 import { BossPayload, BossResponse } from './types';
 
 const INITIAL_SETTINGS: IntegrationSettings = {
@@ -22,10 +24,11 @@ const INITIAL_SETTINGS: IntegrationSettings = {
   googleDriveDestinationFolderName: 'clientes office',
   googleDriveDestinationFolderId: '',
   googleDriveDestinationFolderUrl: '',
+  bossDriveIntegrationKey: 'boss_drive_live_giffoni_key_default',
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'flow' | 'settings'>('flow');
+  const [activeTab, setActiveTab] = useState<'flow' | 'settings' | 'audit'>('flow');
   const [activePayload, setActivePayload] = useState<BossPayload | null>(null);
   const [activeResponse, setActiveResponse] = useState<BossResponse | null>(null);
   const [receiverStatus, setReceiverStatus] = useState<string>('Aguardando payload');
@@ -728,6 +731,18 @@ export default function App() {
             <Settings className={`w-4 h-4 ${activeTab === 'settings' ? 'text-blue-500' : 'text-slate-500'}`} />
             <span>Configurações Drive</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('audit')}
+            className={`w-full flex items-center gap-3 p-2.5 rounded-lg text-xs font-semibold tracking-tight transition-all text-left cursor-pointer ${
+              activeTab === 'audit' 
+                ? 'bg-slate-800 text-white shadow-sm border border-slate-750' 
+                : 'text-slate-400 hover:bg-slate-850 hover:text-slate-200'
+            }`}
+          >
+            <Compass className={`w-4 h-4 ${activeTab === 'audit' ? 'text-blue-500' : 'text-slate-500'}`} />
+            <span>Laudo & Vistoria Técnica</span>
+          </button>
         </nav>
 
         {/* Info box at sidebar bottom */}
@@ -751,9 +766,13 @@ export default function App() {
               <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
                 Criar Pasta do Cliente no Google Drive
               </span>
-            ) : (
+            ) : activeTab === 'settings' ? (
               <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
                 Configurações Drive
+              </span>
+            ) : (
+              <span className="text-slate-900 font-semibold text-xs bg-slate-100 px-2.5 py-0.5 rounded-md">
+                Laudo & Vistoria Técnica
               </span>
             )}
           </div>
@@ -804,7 +823,7 @@ export default function App() {
                 receiverStatus={receiverStatus}
                 onClearReceiver={handleClearReceiver}
               />
-            ) : (
+            ) : activeTab === 'settings' ? (
               <ConfigurationPage
                 isAuthenticated={isAuthenticated}
                 accessToken={accessToken}
@@ -819,6 +838,13 @@ export default function App() {
                 isTesting={isTestLoading}
                 onAddLog={addLog}
                 onTestFolder={handleTestFolder}
+              />
+            ) : (
+              <DeepAuditPage
+                isAuthenticated={isAuthenticated}
+                accessToken={accessToken}
+                userEmail={userEmail}
+                settings={settings}
               />
             )}
           </div>

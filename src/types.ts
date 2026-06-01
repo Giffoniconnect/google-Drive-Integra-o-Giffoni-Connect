@@ -39,6 +39,8 @@ export interface BossResponse {
   googleDriveClientFolderStatus: 'criada' | 'falha';
   googleDriveOperation?: 'created' | 'linked';
   googleDriveClientFolderLogFalha?: string;
+  recebidoEm?: string;
+  googleDriveClientFolderResultLog?: string;
 }
 
 
@@ -57,6 +59,7 @@ export interface IntegrationSettings {
   googleDriveDestinationFolderId: string;
   googleDriveDestinationFolderUrl: string;
   googleDriveAccessToken?: string;
+  bossDriveIntegrationKey?: string;
 }
 
 export interface IntegrationLog {

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { IntegrationSettings, IntegrationLog } from '../types';
 import { GSIButton } from './GSIButton';
+import { GoogleDriveDiagnosisCard } from './GoogleDriveDiagnosisCard';
 
 interface ConfigurationPageProps {
   isAuthenticated: boolean;
@@ -66,6 +67,7 @@ export function ConfigurationPage({
   const [destName, setDestName] = useState(settings.googleDriveDestinationFolderName || 'clientes office');
   const [destId, setDestId] = useState(settings.googleDriveDestinationFolderId || '');
   const [destUrl, setDestUrl] = useState(settings.googleDriveDestinationFolderUrl || '');
+  const [bossKey, setBossKey] = useState(settings.bossDriveIntegrationKey || '');
 
   useEffect(() => {
     if (userEmail) {
@@ -76,6 +78,12 @@ export function ConfigurationPage({
   useEffect(() => {
     setStatusVal(isAuthenticated ? 'connected' : 'disconnected');
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (settings.bossDriveIntegrationKey) {
+      setBossKey(settings.bossDriveIntegrationKey);
+    }
+  }, [settings.bossDriveIntegrationKey]);
 
   const [saving, setSaving] = useState(false);
   const [isTestingFolder, setIsTestingFolder] = useState(false);
@@ -222,10 +230,12 @@ export function ConfigurationPage({
       googleDriveDestinationFolderName: destName,
       googleDriveDestinationFolderId: destId,
       googleDriveDestinationFolderUrl: destUrl,
+      bossDriveIntegrationKey: bossKey,
     });
 
     onAddLog('success', 'Credenciais Google Drive salvas com sucesso.');
     onAddLog('success', 'Pasta destino salva com sucesso.');
+    onAddLog('success', 'Chave de integração Portal BOSS salva com sucesso.');
     
     setTimeout(() => {
       setSaving(false);
@@ -273,6 +283,16 @@ export function ConfigurationPage({
           Infraestrutura Giffoni Connect • v1.2.0
         </div>
       </div>
+
+      {/* DIAGNÓSTICO GOOGLE DRIVE */}
+      <GoogleDriveDiagnosisCard
+        isAuthenticated={isAuthenticated}
+        accessToken={accessToken}
+        userEmail={userEmail}
+        settings={settings}
+        onLogin={onLogin}
+        onAddLog={onAddLog}
+      />
 
       {/* 1. Credenciais & Segurança */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
@@ -422,6 +442,52 @@ export function ConfigurationPage({
               </>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* CARD: CHAVE DE INTEGRAÇÃO PORTAL BOSS ↔ GOOGLE DRIVE */}
+      <div id="card-boss-drive-key" className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+        <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+          <Shield className="w-4 h-4 text-blue-600" />
+          <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans">
+            CHAVE DE INTEGRAÇÃO PORTAL BOSS ↔ GOOGLE DRIVE
+          </h2>
+        </div>
+        
+        <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
+          Uma chave exclusiva para comunicação segura entre o Portal BOSS e este receptor do Google Drive. Recomenda-se começar com o prefixo <code className="bg-slate-105 px-1 py-0.5 rounded text-blue-600 font-mono text-[10px]">boss_drive_live_</code>.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">
+              API Key da Integração (X-BOSS-Google-Drive-Integration-Key)
+            </label>
+            <input
+              type="text"
+              placeholder="Ex: boss_drive_live_giffoni_key_default"
+              value={bossKey}
+              onChange={(e) => setBossKey(e.target.value)}
+              className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-slate-800 font-semibold"
+            />
+          </div>
+
+          {settings.bossDriveIntegrationKey && (
+            <div className="bg-slate-50 border border-slate-150 p-3.5 rounded-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 shadow-2xs">
+              <div className="text-[10px] text-slate-500 font-medium font-sans">
+                Chave Ativa Salva na Configuração:
+              </div>
+              <div className="text-xs font-mono font-bold text-slate-700 bg-white border border-slate-200 px-3 py-1 rounded shadow-3xs">
+                {(() => {
+                  const val = settings.bossDriveIntegrationKey || '';
+                  if (val.length <= 16) {
+                    return 'boss_drive_live_********';
+                  }
+                  return `${val.substring(0, 16)}********${val.substring(val.length - 4)}`;
+                })()}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

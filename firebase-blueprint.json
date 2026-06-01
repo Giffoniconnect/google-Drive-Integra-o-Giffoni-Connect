@@ -1,0 +1,38 @@
+{
+  "entities": {
+    "googleDriveRequest": {
+      "title": "Google Drive Request",
+      "description": "Information about a Google Drive folder request from Portal BOSS",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "sourceBuild": { "type": "string" },
+        "targetBuild": { "type": "string" },
+        "clientType": { "type": "string", "enum": ["PF", "PJ"] },
+        "portalClientId": { "type": "string" },
+        "caseId": { "type": "string" },
+        "clientFolderName": { "type": "string" },
+        "originBlock": { "type": "string" },
+        "originField": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "success", "failed", "processing"] },
+        "createdAt": { "type": "string" },
+        "processedAt": { "type": "string" },
+        "googleDriveClientFolderName": { "type": "string" },
+        "googleDriveClientFolderId": { "type": "string" },
+        "googleDriveClientFolderUrl": { "type": "string" },
+        "googleDriveOperation": { "type": "string", "enum": ["created", "linked"] },
+        "googleDriveClientFolderStatus": { "type": "string" },
+        "googleDriveStatus": { "type": "string" },
+        "googleDriveClientFolderLogFalha": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "required": ["clientType", "portalClientId", "caseId", "clientFolderName", "status"]
+    }
+  },
+  "firestore": {
+    "/googleDriveRequests/{requestId}": {
+      "schema": "googleDriveRequest",
+      "description": "Requests made from Portal BOSS to Google Drive applet to create folder"
+    }
+  }
+}
