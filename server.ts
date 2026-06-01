@@ -97,17 +97,30 @@ function saveSession() {
 }
 
 // Google Drive API Helpers (Server-side)
-async function verifyFolderByIdOnDrive(token: string, folderId: string): Promise<boolean> {
+async function verifyFolderByIdOnDrive(token: string, folderId: string): Promise<{ valid: boolean; errorType?: 'auth' | 'notFound' | 'other'; errorMsg?: string }> {
   try {
     const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,mimeType,trashed`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    if (!res.ok) return false;
+    if (res.status === 401) {
+      return { valid: false, errorType: 'auth', errorMsg: 'OAuth falhou: Token do Google Drive expirado ou inválido.' };
+    }
+    if (res.status === 404) {
+      return { valid: false, errorType: 'notFound', errorMsg: 'Pasta destino falhou: Pasta de destino do Google Drive não existe ou foi excluída.' };
+    }
+    if (!res.ok) {
+      const txt = await res.text();
+      return { valid: false, errorType: 'other', errorMsg: `Erro da Google API: ${res.status} - ${txt}` };
+    }
     const data = await res.json() as any;
-    return !!(data && data.mimeType === 'application/vnd.google-apps.folder' && !data.trashed);
-  } catch (e) {
-    return false;
+    const ok = !!(data && data.mimeType === 'application/vnd.google-apps.folder' && !data.trashed);
+    if (!ok) {
+      return { valid: false, errorType: 'notFound', errorMsg: 'O ID configurado não é uma pasta válida ou está na lixeira.' };
+    }
+    return { valid: true };
+  } catch (e: any) {
+    return { valid: false, errorType: 'other', errorMsg: e.message || String(e) };
   }
 }
 
@@ -283,22 +296,31 @@ async function processFirestoreRequest(requestId: string, data: any) {
     saveSession();
 
     // 2. Validar token Google Drive (Active token validation)
+    addServerLog('info', 'Validando token Google Drive...');
     const token = serverState.accessToken;
     if (!token) {
-      return await handleRequestFailure('Verifique se o Google Drive está conectado corretamente.');
+      return await handleRequestFailure('OAuth falhou: Token do Google Drive expirado ou ausente. Faça login novamente no painel.');
     }
+    addServerLog('success', 'Token Google Drive validado.');
 
     // 3. Validar pasta destino
     const destFolderId = serverState.settings.googleDriveDestinationFolderId;
     if (!destFolderId) {
-      return await handleRequestFailure('Pasta de destino do Google Drive não está configurada.');
+      return await handleRequestFailure('Pasta destino falhou: Pasta de destino do Google Drive não está configurada.');
     }
 
-    const isDestValid = await verifyFolderByIdOnDrive(token, destFolderId);
-    if (!isDestValid) {
-      return await handleRequestFailure('Pasta de destino do Google Drive não existe ou foi excluída.');
+    addServerLog('info', 'Validando pasta destino...');
+    const destCheck = await verifyFolderByIdOnDrive(token, destFolderId);
+    if (!destCheck.valid) {
+      if (destCheck.errorType === 'auth') {
+        return await handleRequestFailure('OAuth falhou: Token do Google Drive expirado ou inválido. Faça login novamente no painel.');
+      } else if (destCheck.errorType === 'notFound') {
+        return await handleRequestFailure('Pasta destino falhou: Pasta de destino do Google Drive não existe ou foi excluída.');
+      } else {
+        return await handleRequestFailure(`Erro da Google API: ${destCheck.errorMsg}`);
+      }
     }
-    addServerLog('success', 'Pasta destino validada.');
+    addServerLog('success', 'Pasta de destino validada.');
 
     // 4. Verificar anti-duplicidade
     addServerLog('info', 'Anti-duplicidade executada.');
@@ -450,21 +472,28 @@ app.post('/api/clear-receiver-state', (req, res) => {
 // Real endpoint POST /api/create-folder
 app.post('/api/create-folder', async (req, res) => {
   addServerLog('info', 'Endpoint acionado.');
-  addServerLog('info', 'Header recebido.');
-  serverState.receiverStatus = 'Processando';
-  saveSession();
-
-  // Validate API Key from header
-  const authKey = req.headers['x-boss-google-drive-integration-key'] || req.headers['X-BOSS-Google-Drive-Integration-Key'];
+  
+  // Validate API Key from header (case-insensitive checking)
+  let authKey = req.headers['x-boss-google-drive-integration-key'] || req.headers['X-BOSS-Google-Drive-Integration-Key'];
+  if (Array.isArray(authKey)) {
+    authKey = authKey[0];
+  }
   const configuredKey = serverState.settings.bossDriveIntegrationKey || 'boss_drive_live_giffoni_key_default';
 
+  if (authKey) {
+    addServerLog('info', 'Header recebido.');
+  } else {
+    addServerLog('info', 'Header não recebido.');
+  }
+
   if (!authKey) {
-    addServerLog('error', 'API Key de integração ausente.');
+    const errorMsg = 'API Key de integração Google Drive ausente. Configure a chave no Portal BOSS e no Build Google Drive.';
+    addServerLog('error', errorMsg);
     serverState.receiverStatus = 'Erro de comunicação';
     const errorResponse = {
       googleDriveStatus: 'failed',
       googleDriveClientFolderStatus: 'falha',
-      googleDriveClientFolderLogFalha: 'API Key de integração ausente.'
+      googleDriveClientFolderLogFalha: errorMsg
     };
     serverState.activeResponse = errorResponse;
     saveSession();
@@ -472,20 +501,22 @@ app.post('/api/create-folder', async (req, res) => {
   }
 
   if (authKey !== configuredKey) {
-    addServerLog('error', 'API Key de integração inválida.');
+    const errorMsg = 'API Key de integração Google Drive inválida. A chave enviada pelo Portal BOSS não corresponde à chave salva no Build Google Drive.';
+    addServerLog('error', errorMsg);
     serverState.receiverStatus = 'Erro de comunicação';
     const errorResponse = {
       googleDriveStatus: 'failed',
       googleDriveClientFolderStatus: 'falha',
-      googleDriveClientFolderLogFalha: 'API Key de integração inválida.'
+      googleDriveClientFolderLogFalha: errorMsg
     };
     serverState.activeResponse = errorResponse;
     saveSession();
     return res.status(403).json(errorResponse);
   }
 
-  addServerLog('success', 'API Key validada.');
-  addServerLog('success', 'API Key recebida e validada.');
+  addServerLog('success', 'API Key de integração Google Drive recebida e validada.');
+  serverState.receiverStatus = 'Processando';
+  saveSession();
   
   const { clientType, portalClientId, caseId, clientFolderName, originBlock, originField } = req.body;
   addServerLog('info', 'Payload recebido.');
@@ -530,19 +561,21 @@ app.post('/api/create-folder', async (req, res) => {
     return sendFailure('Nome da pasta não recebido.');
   }
 
-  addServerLog('info', 'Tipo de cliente identificado.');
-  addServerLog('info', 'Nome recebido.');
+  addServerLog('info', `Tipo de cliente: ${clientType}`);
+  addServerLog('info', `Nome recebido: ${clientFolderName}`);
 
   // Active token verification
+  addServerLog('info', 'Validando token Google Drive...');
   const token = serverState.accessToken;
   if (!token) {
-    return sendFailure('Verifique se o Google Drive está conectado corretamente.');
+    return sendFailure('OAuth falhou: Token do Google Drive expirado ou ausente. Faça login novamente no painel.');
   }
+  addServerLog('success', 'Token Google Drive validado.');
 
   // Active Destination Folder verification
   const destFolderId = serverState.settings.googleDriveDestinationFolderId;
   if (!destFolderId) {
-    return sendFailure('Pasta de destino do Google Drive não está configurada.');
+    return sendFailure('Pasta destino falhou: Pasta de destino do Google Drive não está configurada.');
   }
 
   // Set received payload in State
@@ -561,12 +594,19 @@ app.post('/api/create-folder', async (req, res) => {
   saveSession();
 
   try {
-    const isDestValid = await verifyFolderByIdOnDrive(token, destFolderId);
-    if (!isDestValid) {
-      return sendFailure('Pasta de destino do Google Drive não existe ou foi excluída.');
+    addServerLog('info', 'Validando pasta destino...');
+    const destCheck = await verifyFolderByIdOnDrive(token, destFolderId);
+    if (!destCheck.valid) {
+      if (destCheck.errorType === 'auth') {
+        return sendFailure('OAuth falhou: Token do Google Drive expirado ou inválido. Faça login novamente no painel.');
+      } else if (destCheck.errorType === 'notFound') {
+        return sendFailure('Pasta destino falhou: Pasta de destino do Google Drive não existe ou foi excluída.');
+      } else {
+        return sendFailure(`Erro da Google API: ${destCheck.errorMsg}`);
+      }
     }
     
-    addServerLog('success', 'Pasta destino localizada.');
+    addServerLog('success', 'Pasta de destino validada.');
     addServerLog('info', 'Regra anti-duplicidade executada.');
 
     // Check anti-duplicity on google drive
@@ -615,7 +655,11 @@ app.post('/api/create-folder', async (req, res) => {
 
   } catch (err: any) {
     console.error('Failed to process /api/create-folder:', err);
-    return sendFailure(`Falha ao operar criação de pasta no Google Drive: ${err.message || err}`);
+    const message = err.message || String(err);
+    if (message.includes('Google API') || message.includes('fetch')) {
+      return sendFailure(`Erro da Google API: ${message}`);
+    }
+    return sendFailure(`Falha ao operar criação de pasta no Google Drive: ${message}`);
   }
 });
 

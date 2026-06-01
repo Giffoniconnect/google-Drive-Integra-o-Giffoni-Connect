@@ -461,10 +461,10 @@ export function ConfigurationPage({
         <div className="space-y-3">
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">
-              API Key da Integração (X-BOSS-Google-Drive-Integration-Key)
+              Chave de Integração Portal BOSS → Google Drive (X-BOSS-Google-Drive-Integration-Key)
             </label>
             <input
-              type="text"
+              type="password"
               placeholder="Ex: boss_drive_live_giffoni_key_default"
               value={bossKey}
               onChange={(e) => setBossKey(e.target.value)}
