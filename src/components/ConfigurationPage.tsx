@@ -17,7 +17,11 @@ import {
   ToggleLeft,
   Search,
   ExternalLink,
-  Folder
+  Folder,
+  Eye,
+  EyeOff,
+  Globe,
+  AlertTriangle
 } from 'lucide-react';
 import { IntegrationSettings, IntegrationLog } from '../types';
 import { GSIButton } from './GSIButton';
@@ -68,6 +72,72 @@ export function ConfigurationPage({
   const [destId, setDestId] = useState(settings.googleDriveDestinationFolderId || '');
   const [destUrl, setDestUrl] = useState(settings.googleDriveDestinationFolderUrl || '');
   const [bossKey, setBossKey] = useState(settings.bossDriveIntegrationKey || '');
+  const [showBossKey, setShowBossKey] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  // States for URL Pública da API card
+  const [copiedUrlType, setCopiedUrlType] = useState<'base' | 'status' | 'create' | null>(null);
+  const [isTestingEndpoint, setIsTestingEndpoint] = useState(false);
+  const [endpointResponseStatus, setEndpointResponseStatus] = useState<boolean | null>(null);
+
+  const handleCopyUrl = (type: 'base' | 'status' | 'create', text: string) => {
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        setCopiedUrlType(type);
+        onAddLog('success', `${type === 'base' ? 'URL Base' : type === 'status' ? 'Endpoint Status' : 'Endpoint Criar Pasta'} copiada para a área de transferência.`, 'connection');
+        setTimeout(() => setCopiedUrlType(null), 2000);
+      })
+      .catch((err) => {
+        onAddLog('error', `Falha ao copiar URL: ${err.message || err}`, 'connection');
+      });
+  };
+
+  const handleTestStatusEndpoint = async () => {
+    setIsTestingEndpoint(true);
+    onAddLog('info', 'Iniciando teste real do Endpoint de Status (/api/receiver-status)...', 'connection');
+    try {
+      const response = await fetch('/api/receiver-status');
+      if (response.ok) {
+        setEndpointResponseStatus(true);
+        onAddLog('success', 'Teste de Endpoint Status: resposta bem-sucedida (200 OK)!', 'connection');
+      } else {
+        setEndpointResponseStatus(false);
+        onAddLog('error', `O Endpoint Status respondeu com erro. Código: ${response.status}`, 'connection');
+      }
+    } catch (e: any) {
+      setEndpointResponseStatus(false);
+      onAddLog('error', `Falha ao alcançar o Endpoint Status: ${e.message || e}`, 'connection');
+    } finally {
+      setIsTestingEndpoint(false);
+    }
+  };
+
+  useEffect(() => {
+    const autoCheckEndpoint = async () => {
+      try {
+        const response = await fetch('/api/receiver-status');
+        if (response.ok) {
+          setEndpointResponseStatus(true);
+        } else {
+          setEndpointResponseStatus(false);
+        }
+      } catch (err) {
+        setEndpointResponseStatus(false);
+      }
+    };
+    autoCheckEndpoint();
+  }, []);
+
+  const handleCopyKey = (textToCopy: string) => {
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy)
+      .then(() => {
+        setCopySuccess(true);
+        onAddLog('success', 'Chave de integração copiada para a área de transferência.', 'connection');
+        setTimeout(() => setCopySuccess(false), 2000);
+      })
+      .catch(() => {});
+  };
 
   useEffect(() => {
     if (userEmail) {
@@ -294,6 +364,121 @@ export function ConfigurationPage({
         onAddLog={onAddLog}
       />
 
+      {/* CARD: URL PÚBLICA DA API */}
+      <div id="card-public-api-url" className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-blue-600" />
+            <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider font-sans">
+              URL Pública da API
+            </h2>
+          </div>
+          <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 font-mono px-2 py-0.5 rounded-md">
+            Runtime Dinâmico
+          </span>
+        </div>
+
+        <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
+          O Portal BOSS precisa se comunicar com este serviço. Abaixo estão as URLs de integração calculadas dinamicamente com base no ambiente atual.
+        </p>
+
+        {/* ALERTA: aistudio.google.com */}
+        {window.location.origin.includes('aistudio.google.com') && (
+          <div className="flex items-start gap-2.5 p-3.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-xs font-sans leading-relaxed">
+              <strong className="font-bold">Aviso do Editor:</strong> Esta URL é do editor AI Studio e não serve como API externa. Abra o app no modo execução/runtime público.
+            </div>
+          </div>
+        )}
+
+        {/* STATUS DO ENDPOINT */}
+        {!window.location.origin.includes('aistudio.google.com') && endpointResponseStatus === true && (
+          <div className="flex items-start gap-2.5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 animate-fade-in">
+            <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="text-xs font-sans leading-relaxed">
+              <strong className="font-bold">Validação de API:</strong> Esta URL está ativa e respondendo corretamente em <code className="bg-emerald-100/70 px-1 py-0.5 rounded text-emerald-900 font-mono text-[10px]">/api/receiver-status</code>. Ela pode ser usada no Portal BOSS.
+            </div>
+          </div>
+        )}
+
+        {/* DETAILS SECTION */}
+        <div className="space-y-4 pt-1">
+          {/* 1. URL Base */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 font-sans">
+                URL Base
+              </label>
+              <button
+                type="button"
+                onClick={() => handleCopyUrl('base', window.location.origin)}
+                className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+              >
+                <Copy className="w-3 h-3" />
+                <span>{copiedUrlType === 'base' ? 'Copiado!' : 'Copiar URL Base'}</span>
+              </button>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-xs text-slate-800 font-semibold break-all select-all flex items-center justify-between">
+              <span>{window.location.origin}</span>
+            </div>
+          </div>
+
+          {/* 2. Endpoint Status */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 font-sans">
+                Endpoint Status
+              </label>
+              <button
+                type="button"
+                onClick={() => handleCopyUrl('status', `${window.location.origin}/api/receiver-status`)}
+                className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+              >
+                <Copy className="w-3 h-3" />
+                <span>{copiedUrlType === 'status' ? 'Copiado!' : 'Copiar Endpoint Status'}</span>
+              </button>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-xs text-slate-800 font-semibold break-all select-all flex items-center justify-between">
+              <span>{window.location.origin}/api/receiver-status</span>
+            </div>
+          </div>
+
+          {/* 3. Endpoint Criar Pasta */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-450 font-sans">
+                Endpoint Criar Pasta
+              </label>
+              <button
+                type="button"
+                onClick={() => handleCopyUrl('create', `${window.location.origin}/api/create-folder`)}
+                className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+              >
+                <Copy className="w-3 h-3" />
+                <span>{copiedUrlType === 'create' ? 'Copiado!' : 'Copiar Endpoint Criar Pasta'}</span>
+              </button>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-xs text-slate-800 font-semibold break-all select-all flex items-center justify-between">
+              <span>{window.location.origin}/api/create-folder</span>
+            </div>
+          </div>
+        </div>
+
+        {/* TEST BUTTON */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={handleTestStatusEndpoint}
+            disabled={isTestingEndpoint}
+            className="w-full flex items-center justify-center gap-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs py-2 px-4 rounded-lg transition-all cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isTestingEndpoint ? 'animate-spin text-blue-500' : 'text-slate-500'}`} />
+            <span>{isTestingEndpoint ? 'Testando...' : 'Testar Endpoint Status'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* 1. Credenciais & Segurança */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
         <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
@@ -463,13 +648,33 @@ export function ConfigurationPage({
             <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-450 mb-1">
               Chave de Integração Portal BOSS → Google Drive (X-BOSS-Google-Drive-Integration-Key)
             </label>
-            <input
-              type="password"
-              placeholder="Ex: boss_drive_live_giffoni_key_default"
-              value={bossKey}
-              onChange={(e) => setBossKey(e.target.value)}
-              className="w-full text-xs font-mono px-3 py-1.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-slate-800 font-semibold"
-            />
+            <div className="relative flex items-center">
+              <input
+                type={showBossKey ? "text" : "password"}
+                placeholder="Ex: boss_drive_live_giffoni_key_default"
+                value={bossKey}
+                onChange={(e) => setBossKey(e.target.value)}
+                className="w-full text-xs font-mono pl-3 pr-20 py-2 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-slate-800 font-semibold"
+              />
+              <div className="absolute right-2 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShowBossKey(!showBossKey)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-200/55 transition-all cursor-pointer"
+                  title={showBossKey ? "Ocultar Chave" : "Mostrar Chave"}
+                >
+                  {showBossKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopyKey(bossKey)}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-200/55 transition-all cursor-pointer"
+                  title="Copiar Chave"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
 
           {settings.bossDriveIntegrationKey && (
@@ -477,14 +682,24 @@ export function ConfigurationPage({
               <div className="text-[10px] text-slate-500 font-medium font-sans">
                 Chave Ativa Salva na Configuração:
               </div>
-              <div className="text-xs font-mono font-bold text-slate-700 bg-white border border-slate-200 px-3 py-1 rounded shadow-3xs">
-                {(() => {
-                  const val = settings.bossDriveIntegrationKey || '';
-                  if (val.length <= 16) {
-                    return 'boss_drive_live_********';
-                  }
-                  return `${val.substring(0, 16)}********${val.substring(val.length - 4)}`;
-                })()}
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-mono font-bold text-slate-700 bg-white border border-slate-200 px-3 py-1 rounded shadow-3xs">
+                  {(() => {
+                    const val = settings.bossDriveIntegrationKey || '';
+                    if (val.length <= 16) {
+                      return 'boss_drive_live_********';
+                    }
+                    return `${val.substring(0, 16)}********${val.substring(val.length - 4)}`;
+                  })()}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopyKey(settings.bossDriveIntegrationKey || '')}
+                  className="p-1 text-slate-400 hover:text-slate-600 bg-white border border-slate-200 rounded hover:bg-slate-100 transition-all cursor-pointer"
+                  title="Copiar Chave Completa"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           )}
